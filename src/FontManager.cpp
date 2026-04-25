@@ -3,6 +3,18 @@
 #include <esp_heap_caps.h>
 #include <pgmspace.h>
 #include <string.h>
+#include <SPIFFS.h>
+
+static bool ensureFontResourceFS() {
+    static bool tried = false;
+    static bool ok = false;
+    if (!tried) {
+        tried = true;
+        ok = SPIFFS.begin(true);
+        Serial.printf("[FS] SPIFFS %s\n", ok ? "mounted" : "mount failed");
+    }
+    return ok;
+}
 
 FontManager::FontManager() : 
     _fontType(FontType::BITMAP_1BPP),
@@ -26,6 +38,12 @@ bool FontManager::loadFont(const char* path) {
     _currentPath[sizeof(_currentPath) - 1] = '\0';
     
     _file = SD.open(path, FILE_READ);
+    if (!_file && ensureFontResourceFS()) {
+        _file = SPIFFS.open(path, FILE_READ);
+        if (_file) {
+            Serial.printf("[Font] Loaded from SPIFFS: %s\n", path);
+        }
+    }
     if (!_file) {
         Serial.printf("[Font] Failed to open: %s, trying builtin\n", path);
         return loadBuiltinFont();
@@ -203,25 +221,37 @@ void FontManager::unload() {
 
 int FontManager::scanFonts(char paths[][128], char names[][64], int maxCount) {
     int count = 0;
-    File root = SD.open(FONTS_DIR);
-    if (!root) return 0;
-    
-    File file = root.openNextFile();
-    while (file && count < maxCount) {
-        String name = file.name();
-        if (name.endsWith(".fnt")) {
-            String fullPath = String(FONTS_DIR) + "/" + name;
-            strncpy(paths[count], fullPath.c_str(), 127);
-            paths[count][127] = '\0';
-            
-            String displayName = name;
-            displayName.replace(".fnt", "");
-            strncpy(names[count], displayName.c_str(), 63);
-            names[count][63] = '\0';
-            count++;
+    auto scanFs = [&](fs::FS& fs, const char* prefix) {
+        if (count >= maxCount) return;
+        File root = fs.open(FONTS_DIR);
+        if (!root || !root.isDirectory()) {
+            if (root) root.close();
+            return;
         }
-        file = root.openNextFile();
-    }
+        File file = root.openNextFile();
+        while (file && count < maxCount) {
+            String name = file.name();
+            int slash = name.lastIndexOf('/');
+            if (slash >= 0) name = name.substring(slash + 1);
+            if (name.endsWith(".fnt")) {
+                String fullPath = String(FONTS_DIR) + "/" + name;
+                strncpy(paths[count], fullPath.c_str(), 127);
+                paths[count][127] = '\0';
+
+                String displayName = String(prefix) + name;
+                displayName.replace(".fnt", "");
+                strncpy(names[count], displayName.c_str(), 63);
+                names[count][63] = '\0';
+                count++;
+            }
+            file.close();
+            file = root.openNextFile();
+        }
+        root.close();
+    };
+
+    scanFs(SD, "SD ");
+    if (ensureFontResourceFS()) scanFs(SPIFFS, "内置 ");
     return count;
 }
 

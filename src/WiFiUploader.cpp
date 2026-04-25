@@ -1,4 +1,6 @@
 #include "WiFiUploader.h"
+#include <ElegantOTA.h>
+#include <SPIFFS.h>
 
 // Web 文件管理页面（存储在 PROGMEM 中）
 static const char FILE_MANAGER_PAGE[] PROGMEM = R"=====(
@@ -9,21 +11,22 @@ static const char FILE_MANAGER_PAGE[] PROGMEM = R"=====(
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>M5PaperS3 文件管理</title>
 <style>
-:root{--bg:#f4f6f8;--card:#fff;--text:#1f2937;--muted:#6b7280;--line:#e5e7eb;--primary:#2563eb;--danger:#dc2626;--ok:#16a34a}
+:root{--bg:#f4f6f8;--card:#fff;--text:#1f2937;--muted:#6b7280;--line:#e5e7eb;--primary:#2563eb;--danger:#dc2626;--ok:#16a34a;--ink:#111827}
 *{box-sizing:border-box}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;margin:0;background:var(--bg);color:var(--text)}
-.wrap{max-width:880px;margin:0 auto;padding:18px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h1{font-size:24px;margin:12px 0}.card{background:var(--card);border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 4px 18px rgba(15,23,42,.08)}
+.wrap{max-width:980px;margin:0 auto;padding:18px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}h1{font-size:24px;margin:12px 0}.card{background:var(--card);border-radius:16px;padding:18px;margin:14px 0;box-shadow:0 4px 18px rgba(15,23,42,.08)}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.stat{background:#f8fafc;border:1px solid var(--line);border-radius:14px;padding:14px}.stat b{display:block;font-size:20px;color:var(--ink);margin-top:6px}.nav{display:flex;gap:8px;flex-wrap:wrap}.nav a{text-decoration:none;border-radius:999px;padding:9px 12px;background:#eef2ff;color:#3730a3}
 .breadcrumb{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:14px;color:var(--muted)}.crumb{border:0;background:#eef2ff;color:#3730a3;border-radius:999px;padding:7px 10px;cursor:pointer}.crumb:hover{background:#e0e7ff}
 .toolbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}.btn{border:0;border-radius:10px;padding:10px 13px;font-size:15px;cursor:pointer;background:#111827;color:#fff}.btn.primary{background:var(--primary)}.btn.danger{background:var(--danger)}.btn.light{background:#e5e7eb;color:#111827}.btn:disabled{opacity:.5;cursor:not-allowed}
 .drop{border:2px dashed #cbd5e1;border-radius:14px;padding:20px;text-align:center;color:var(--muted);margin-top:14px}.drop.drag{border-color:var(--primary);background:#eff6ff}input[type=file]{display:none}
 .status{min-height:22px;margin-top:12px;font-size:14px}.ok{color:var(--ok)}.err{color:var(--danger)}
 .list{overflow:hidden;border:1px solid var(--line);border-radius:14px}.row{display:grid;grid-template-columns:minmax(0,1fr) 105px 82px;gap:10px;align-items:center;padding:12px 14px;border-bottom:1px solid var(--line)}.row:last-child{border-bottom:0}.name{display:flex;align-items:center;gap:10px;min-width:0}.name a,.folder{color:var(--text);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.folder{border:0;background:transparent;font:inherit;cursor:pointer;padding:0;text-align:left}.folder:hover,.name a:hover{color:var(--primary)}.size{color:var(--muted);font-size:13px;text-align:right}.actions{text-align:right}.empty{padding:28px;text-align:center;color:var(--muted)}
-@media(max-width:620px){.wrap{padding:10px}h1{font-size:21px}.card{padding:14px;border-radius:12px}.row{grid-template-columns:1fr;gap:8px}.size,.actions{text-align:left}.toolbar .btn{flex:1}.top{display:block}}
+@media(max-width:620px){.wrap{padding:10px}h1{font-size:21px}.card{padding:14px;border-radius:12px}.row{grid-template-columns:1fr;gap:8px}.size,.actions{text-align:left}.toolbar .btn{flex:1}.top{display:block}.grid{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <div class="top"><h1>📚 M5PaperS3 文件管理</h1><button class="btn light" onclick="refreshList()">刷新</button></div>
-  <div class="card">
+  <div class="top"><h1>📚 M5PaperS3 管理中心</h1><div class="nav"><a href="/update">固件OTA</a><a href="#files" onclick="refreshList()">文件</a></div></div>
+  <div class="card"><div id="stats" class="grid"><div class="stat">设备IP<b>加载中</b></div><div class="stat">固件空间<b>-</b></div><div class="stat">SPIFFS资源<b>-</b></div><div class="stat">运行内存<b>-</b></div></div></div>
+  <div id="files" class="card">
     <div id="breadcrumb" class="breadcrumb"></div>
     <div class="toolbar">
       <label class="btn primary" for="fileInput">上传文件</label>
@@ -31,7 +34,7 @@ static const char FILE_MANAGER_PAGE[] PROGMEM = R"=====(
       <button class="btn light" onclick="newFolder()">新建文件夹</button>
       <button class="btn light" onclick="goUp()">返回上级</button>
     </div>
-    <div id="drop" class="drop">拖拽 .txt 文件到这里上传，或点击“上传文件”</div>
+    <div id="drop" class="drop">拖拽 .txt / .epub 文件到这里上传，或点击“上传文件”</div>
     <div id="status" class="status"></div>
   </div>
   <div class="card"><div id="fileList" class="list"><div class="empty">加载中...</div></div></div>
@@ -44,6 +47,7 @@ function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;',
 function joinPath(base,name){return (base==='/'?'':base)+'/'+name}
 function parentPath(p){if(!p||p==='/')return '/'; const i=p.lastIndexOf('/'); return i<=0?'/':p.slice(0,i)}
 function fmtSize(n){if(n===0)return '0 B'; const u=['B','KB','MB','GB']; let i=0,v=n; while(v>=1024&&i<u.length-1){v/=1024;i++} return (i? v.toFixed(1):v)+' '+u[i]}
+async function loadStatus(){try{const s=await (await fetch('/api/status')).json();$('stats').innerHTML='<div class="stat">设备IP<b>'+esc(s.ip)+'</b></div><div class="stat">固件空间<b>'+fmtSize(s.freeSketch)+'</b></div><div class="stat">SPIFFS资源<b>'+fmtSize(s.spiffsUsed)+' / '+fmtSize(s.spiffsTotal)+'</b></div><div class="stat">运行内存<b>'+fmtSize(s.freeHeap)+'</b></div>'}catch(e){}}
 function setStatus(msg, cls=''){ $('status').className='status '+cls; $('status').textContent=msg||'' }
 function renderBreadcrumb(){
   const parts=currentPath.split('/').filter(Boolean); let html='<button class="crumb" onclick="openPath(\'/\')">根目录</button>'; let p='';
@@ -85,6 +89,7 @@ const drop=$('drop');
 ['dragenter','dragover'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag')}));
 ['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag')}));
 drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0]; if(f)uploadFile(f)});
+loadStatus();
 loadList();
 </script>
 </body>
@@ -115,6 +120,9 @@ bool WebFileManager::start(const char* ssid, const char* password) {
     }
     
     Serial.printf("[WiFi] Connected, IP: %s\n", WiFi.localIP().toString().c_str());
+    if (!SPIFFS.begin(true)) {
+        Serial.println("[FS] SPIFFS mount failed");
+    }
     
     _server = new WebServer(8080);
     _server->on("/", HTTP_GET, [this]() { handleRoot(); });
@@ -132,7 +140,9 @@ bool WebFileManager::start(const char* ssid, const char* password) {
     _server->on("/api/list", HTTP_GET, [this]() { handleApiList(); });
     _server->on("/api/delete", HTTP_POST, [this]() { handleApiDelete(); });
     _server->on("/api/mkdir", HTTP_POST, [this]() { handleApiMkdir(); });
+    _server->on("/api/status", HTTP_GET, [this]() { handleApiStatus(); });
     _server->on("/download", HTTP_GET, [this]() { handleDownload(); });
+    ElegantOTA.begin(_server);
     _server->onNotFound([this]() { handleNotFound(); });
     _server->begin();
     
@@ -159,6 +169,7 @@ String WebFileManager::getIP() const {
 void WebFileManager::handleClient() {
     if (_server) {
         _server->handleClient();
+        ElegantOTA.loop();
     }
 }
 
@@ -231,8 +242,10 @@ void WebFileManager::handleUpload() {
         int backslash = filename.lastIndexOf('\\');
         int cut = max(slash, backslash);
         if (cut >= 0) filename = filename.substring(cut + 1);
-        if (!filename.endsWith(".txt")) {
-            _uploadError = "只支持 .txt 文件";
+        String lower = filename;
+        lower.toLowerCase();
+        if (!(lower.endsWith(".txt") || lower.endsWith(".epub"))) {
+            _uploadError = "只支持 .txt / .epub 文件";
             return;
         }
 
@@ -281,7 +294,7 @@ void WebFileManager::handleList() {
         bool first = true;
         while (file) {
             String name = file.name();
-            if (!file.isDirectory() && name.endsWith(".txt")) {
+            if (!file.isDirectory() && (name.endsWith(".txt") || name.endsWith(".epub"))) {
                 int slash = name.lastIndexOf('/');
                 if (slash >= 0) name = name.substring(slash + 1);
                 if (!first) json += ",";
@@ -363,6 +376,26 @@ void WebFileManager::handleApiMkdir() {
         return;
     }
     _server->send(200, "text/plain", "目录已创建");
+}
+
+void WebFileManager::handleApiStatus() {
+    size_t spiffsTotal = 0;
+    size_t spiffsUsed = 0;
+    if (SPIFFS.begin(true)) {
+        spiffsTotal = SPIFFS.totalBytes();
+        spiffsUsed = SPIFFS.usedBytes();
+    }
+
+    String json = "{";
+    json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+    json += "\"rssi\":" + String(WiFi.RSSI()) + ",";
+    json += "\"freeHeap\":" + String(ESP.getFreeHeap()) + ",";
+    json += "\"sketchSize\":" + String(ESP.getSketchSize()) + ",";
+    json += "\"freeSketch\":" + String(ESP.getFreeSketchSpace()) + ",";
+    json += "\"spiffsTotal\":" + String(spiffsTotal) + ",";
+    json += "\"spiffsUsed\":" + String(spiffsUsed);
+    json += "}";
+    _server->send(200, "application/json", json);
 }
 
 void WebFileManager::handleDownload() {

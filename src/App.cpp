@@ -105,29 +105,20 @@ bool App::initSD() {
 }
 
 bool App::initFont() {
-    if (SD.exists(FONT_FILE_24)) {
-        if (_font.loadFont(FONT_FILE_24)) {
-            if (strncmp(_font.getCurrentFontPath(), "builtin://", 10) == 0) {
-                showMessage("使用内置字体", 1000);
-            } else {
-                Serial.println("[Font] Loaded 24px");
-            }
-            return true;
+    if (_font.loadFont(FONT_FILE_24)) {
+        if (strncmp(_font.getCurrentFontPath(), "builtin://", 10) == 0) {
+            showMessage("使用内置字体", 1000);
+        } else {
+            Serial.printf("[Font] Loaded: %s\n", _font.getCurrentFontPath());
         }
+        return true;
     }
-    if (SD.exists(FONT_FILE_16)) {
-        if (_font.loadFont(FONT_FILE_16)) {
-            if (strncmp(_font.getCurrentFontPath(), "builtin://", 10) == 0) {
-                showMessage("使用内置字体", 1000);
-            } else {
-                Serial.println("[Font] Loaded 16px");
-            }
-            return true;
+    if (_font.loadFont(FONT_FILE_16)) {
+        if (strncmp(_font.getCurrentFontPath(), "builtin://", 10) == 0) {
+            showMessage("使用内置字体", 1000);
+        } else {
+            Serial.printf("[Font] Loaded: %s\n", _font.getCurrentFontPath());
         }
-    }
-    Serial.println("[Font] No SD font file found, trying builtin");
-    if (_font.loadBuiltinFont()) {
-        showMessage("使用内置字体", 1000);
         return true;
     }
     Serial.println("[Font] No font available!");

@@ -42,6 +42,7 @@ private:
     void handleApiList();
     void handleApiDelete();
     void handleApiMkdir();
+    void handleApiStatus();
     void handleDownload();
     void handleNotFound();
     void sendHtmlPage(const char* title, const char* body);
