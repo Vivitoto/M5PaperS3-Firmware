@@ -28,6 +28,11 @@ public:
     
     // 获取列表
     const std::vector<FileItem>& getItems() const { return _items; }
+    int getItemCount() const { return _items.size(); }
+    const FileItem* getItem(int index) const {
+        if (index >= 0 && index < (int)_items.size()) return &_items[index];
+        return nullptr;
+    }
     
     // 选择项
     void selectNext();

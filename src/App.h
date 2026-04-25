@@ -50,6 +50,16 @@ private:
     int _bookmarkMenuScroll;  // 书签菜单滚动偏移
     int _fontMenuIndex;       // 字体菜单选中项
     int _fontMenuScroll;      // 字体菜单滚动偏移
+    int _settingsScroll;      // 设置页面滚动偏移
+    
+    // 当前激活标签页
+    int _activeTab;           // 0=读书 1=书架 2=传输 3=设置
+    bool _tabNeedsRender[4];  // 各标签页是否需要重绘
+    
+    // 书架9宫格
+    int _libraryPage;         // 书架当前页
+    int _libraryTotalPages;   // 书架总页数
+    int _librarySelected;     // 书架选中索引
     
     // 页码跳转
     char _gotoPageInput[8];
@@ -83,26 +93,46 @@ private:
     
     // 状态处理
     void handleInit();
-    void handleFileBrowser();
+    void handleTabReading();     // 📖 读书主页
+    void handleTabLibrary();     // 📚 书架9宫格
+    void handleTabTransfer();    // 🛜 传输中心
+    void handleTabSettings();    // ⚙️ 设置页
     void handleReader();
-    void handleMenu();
-    void handleLayoutMenu();    // 排版设置子菜单
-    void handleChapterMenu();   // 章节目录菜单
-    void handleRefreshMenu();   // 残影控制菜单
-    void handleBookmarkMenu();  // 书签菜单
-    void handleFontMenu();      // 字体切换菜单
-    void handleGotoPage();      // 页码跳转
-    void handleWiFiUpload();    // WiFi传书界面
-    void handleReadingStats();  // 阅读统计
-    void handleEndOfBook();     // 书末处理
-    void handleLegadoSync();    // Legado同步界面
-    void handleWiFiConfig();    // WiFi配置
-    void syncLegadoProgress();  // 执行同步
-    void loadWiFiConfig();      // 加载WiFi配置
-    void saveWiFiConfig();      // 保存WiFi配置
-    void loadLegadoConfig();    // 加载Legado配置
-    void saveLegadoConfig();    // 保存Legado配置
-    void drawSleepScreen();     // 休眠屏
+    void handleReaderMenu();     // 阅读时弹出菜单
+    void handleChapterList();    // 章节目录
+    void handleBookmarkList();   // 书签列表
+    void handleGotoPage();       // 页码跳转
+    void handleReadingStats();   // 阅读统计
+    void handleWiFiUpload();     // WiFi传书界面
+    void handleSettingsLayout(); // 排版设置
+    void handleSettingsRefresh();// 残影控制
+    void handleSettingsFont();   // 字体切换
+    void handleSettingsWiFi();   // WiFi配置
+    void handleSettingsLegado(); // Legado同步
+    void handleEndOfBook();      // 书末处理
+    void handleWiFiConfig();     // WiFi配置简化界面
+    void handleLegadoSync();     // Legado同步界面
+    void syncLegadoProgress();   // 执行同步
+    void loadWiFiConfig();       // 加载WiFi配置
+    void saveWiFiConfig();       // 保存WiFi配置
+    void loadLegadoConfig();     // 加载Legado配置
+    void saveLegadoConfig();     // 保存Legado配置
+    void drawSleepScreen();      // 休眠屏
+    
+    // 标签页导航
+    void renderTopTabs();
+    void renderBottomNav();
+    void switchTab(int tab);
+    bool isTabState(AppState state);
+    
+    // 旧函数名兼容
+    void handleFileBrowser();    // → handleTabReading
+    void handleMenu();           // → 旧菜单，保留兼容
+    void handleChapterMenu();    // → handleChapterList
+    void handleLayoutMenu();     // → handleSettingsLayout
+    void handleRefreshMenu();    // → handleSettingsRefresh
+    void handleBookmarkMenu();   // → handleBookmarkList
+    void handleFontMenu();       // → handleSettingsFont
     
     // 触摸处理
     void processTouch();

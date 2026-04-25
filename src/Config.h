@@ -86,19 +86,37 @@ struct LayoutConfig {
 // ===== 应用状态 =====
 enum class AppState {
     INIT,
-    FILE_BROWSER,
+    // 主标签页
+    TAB_READING,      // 📖 读书主页（最近阅读 + 统计）
+    TAB_LIBRARY,      // 📚 书架（9宫格封面）
+    TAB_TRANSFER,     // 🛜 传输（WiFi/蓝牙/同步）
+    TAB_SETTINGS,     // ⚙️ 设置（卡片式）
+    // 阅读状态
     READER,
-    MENU,
-    MENU_LAYOUT,      // 排版设置子菜单
-    MENU_CHAPTER,     // 章节目录菜单
-    MENU_REFRESH,     // 残影控制菜单
-    MENU_BOOKMARK,    // 书签菜单
-    MENU_FONT,        // 字体切换菜单
-    MENU_GOTO_PAGE,   // 页码跳转
-    WIFI_UPLOAD,      // WiFi传书界面
+    READER_MENU,      // 阅读时弹出菜单（半透明遮罩）
+    // 设置子页面
+    SETTINGS_LAYOUT,  // 排版设置
+    SETTINGS_REFRESH, // 残影控制
+    SETTINGS_FONT,    // 字体切换
+    SETTINGS_WIFI,    // WiFi配置
+    SETTINGS_LEGADO,  // Legado同步
+    // 阅读工具
+    CHAPTER_LIST,     // 章节目录
+    BOOKMARK_LIST,    // 书签列表
+    GOTO_PAGE,        // 页码跳转
     READING_STATS,    // 阅读统计
-    SETTINGS,
-    MESSAGE
+    // 其他
+    WIFI_UPLOAD,
+    MESSAGE,
+    // 兼容旧状态名
+    FILE_BROWSER = TAB_READING,
+    MENU = READER_MENU,
+    MENU_CHAPTER = CHAPTER_LIST,
+    MENU_GOTO_PAGE = GOTO_PAGE,
+    MENU_LAYOUT = SETTINGS_LAYOUT,
+    MENU_REFRESH = SETTINGS_REFRESH,
+    MENU_BOOKMARK = BOOKMARK_LIST,
+    MENU_FONT = SETTINGS_FONT
 };
 
 // ===== 休眠省电配置 =====
