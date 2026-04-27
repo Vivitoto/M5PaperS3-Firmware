@@ -5,6 +5,32 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v1.2.5",
+      "name": "Vink-PaperS3 v1.2.5 High contrast UI test",
+      "summary": "修复主界面灰色网纹，改为纯黑白高对比 UI；电源键改为开机后再按一次关机。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v1.2.5",
+      "changelog": "## Vink-PaperS3 v1.2.5 High contrast UI test\n\n### PaperS3 高对比 UI\n- 修复主 UI 直接绘制到 `M5.Display` 时误用 4bpp 颜色索引 `15/0` 的问题。\n- 主题颜色改为 `TFT_WHITE / TFT_BLACK`，避免大面积背景被电子纸抖动成灰色网纹。\n- 卡片边框加粗到 2px，主要文字保持纯黑，提高 PaperS3 屏幕可读性。\n\n### 电源键行为\n- 目标行为改为：按一次硬件开机；系统启动完成后，再按一次电源键关机。\n- 启动后前 3 秒并且电源键释放前，不响应关机事件，避免开机按键残留导致刚开机就关机。\n- 关机前保存阅读进度/统计，并停止 WiFi 上传与蓝牙翻页服务。\n- 如果 `M5.Power.powerOff()` 未真正断电，则退回 deep sleep，避免表现成重启。\n\n### 烧录包\n- Vink Flasher 默认继续使用 `full` 完整 16MB 镜像，从 `0x0` 写入。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v1.2.5-high-contrast-ui-test-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.5/Vink-PaperS3-v1.2.5-high-contrast-ui-test-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        },
+        "ota": {
+          "name": "Vink-PaperS3-v1.2.5-high-contrast-ui-test-ota.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.5/Vink-PaperS3-v1.2.5-high-contrast-ui-test-ota.bin",
+          "size": 1904032,
+          "flashOffset": 65536
+        },
+        "spiffs": {
+          "name": "Vink-PaperS3-v1.2.5-high-contrast-ui-test-spiffs.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.5/Vink-PaperS3-v1.2.5-high-contrast-ui-test-spiffs.bin",
+          "size": 4128768
+        }
+      }
+    },
+    {
       "version": "v1.2.4",
       "name": "Vink-PaperS3 v1.2.4 BW shell test",
       "summary": "套用 ReadPaper 的 PaperS3 显示初始化路径，并临时切换黑白主界面以验证灰度网纹问题。",

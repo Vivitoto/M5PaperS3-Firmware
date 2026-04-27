@@ -1,22 +1,26 @@
 #include "UITheme.h"
 #include <M5Unified.h>
 
-void UITheme::drawRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint8_t color) {
+void UITheme::drawRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint16_t color) {
     auto& display = M5.Display;
     display.drawRoundRect(x, y, w, h, r, color);
 }
 
-void UITheme::fillRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint8_t color) {
+void UITheme::fillRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint16_t color) {
     auto& display = M5.Display;
     display.fillRoundRect(x, y, w, h, r, color);
 }
 
-void UITheme::drawCard(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t bgColor, uint8_t borderColor) {
+void UITheme::drawCard(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t bgColor, uint16_t borderColor) {
     auto& display = M5.Display;
     // 填充背景
     fillRoundRect(x, y, w, h, CARD_RADIUS, bgColor);
-    // 绘制边框
+    // PaperS3 上 1px 细线太虚，卡片边框统一加粗到 2px。
     drawRoundRect(x, y, w, h, CARD_RADIUS, borderColor);
+    if (w > 4 && h > 4) {
+        const int16_t innerRadius = CARD_RADIUS > 0 ? CARD_RADIUS - 1 : 0;
+        drawRoundRect(x + 1, y + 1, w - 2, h - 2, innerRadius, borderColor);
+    }
 }
 
 void UITheme::drawTabBookmark(int16_t x, int16_t y, int16_t w, int16_t h, bool active, const char* label, const char* icon) {
@@ -186,7 +190,7 @@ void UITheme::drawSeparator(int16_t x, int16_t y, int16_t w) {
     display.drawLine(x, y, x + w, y, BORDER_LIGHT);
 }
 
-void UITheme::drawIconButton(int16_t x, int16_t y, int16_t size, const char* icon, uint8_t bgColor) {
+void UITheme::drawIconButton(int16_t x, int16_t y, int16_t size, const char* icon, uint16_t bgColor) {
     auto& display = M5.Display;
     fillRoundRect(x, y, size, size, size/4, bgColor);
     display.setTextSize(1);
@@ -201,7 +205,7 @@ int16_t UITheme::textWidth(const char* text, uint8_t textSize) {
     return strlen(text) * 6 * textSize;
 }
 
-void UITheme::drawTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const char* text, uint8_t textSize, uint8_t color) {
+void UITheme::drawTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const char* text, uint8_t textSize, uint16_t color) {
     auto& display = M5.Display;
     int16_t tw = textWidth(text, textSize);
     int16_t th = 8 * textSize;
@@ -212,7 +216,7 @@ void UITheme::drawTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
 }
 
-void UITheme::drawTextRight(int16_t x, int16_t y, int16_t w, const char* text, uint8_t textSize, uint8_t color) {
+void UITheme::drawTextRight(int16_t x, int16_t y, int16_t w, const char* text, uint8_t textSize, uint16_t color) {
     auto& display = M5.Display;
     int16_t tw = textWidth(text, textSize);
     display.setTextColor(color, BG_LIGHT);

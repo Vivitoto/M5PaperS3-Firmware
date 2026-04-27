@@ -10,7 +10,7 @@ App::App() : _state(AppState::INIT), _reader(_font), _touching(false),
              _fontMenuIndex(0), _fontMenuScroll(0), _settingsScroll(0),
              _activeTab(0), _libraryPage(0), _libraryTotalPages(1), _librarySelected(0),
              _gotoPageCursor(0),
-             _lastActivityTime(0), _sleepPending(false),
+             _lastActivityTime(0), _sleepPending(false), _powerButtonArmed(false),
              _sleepTimeoutMin(AUTO_SLEEP_DEFAULT_MIN),
              _fontCount(0) {
     memset(_gotoPageInput, 0, sizeof(_gotoPageInput));
@@ -71,6 +71,7 @@ bool App::init() {
     loadGlobalSettings();
     _lastActivityTime = millis();
     _sleepPending = false;
+    _powerButtonArmed = false;
     
     _stats.load();
     _recent.load();
@@ -107,7 +108,7 @@ bool App::initDisplay() {
     canvas.println("Vink-PaperS3");
     canvas.setTextSize(1);
     canvas.setCursor(24, 76);
-    canvas.println("v1.2.4 BW shell UI test");
+    canvas.println("v1.2.5 high contrast UI test");
     canvas.setCursor(24, 104);
     canvas.printf("Display %dx%d", display.width(), display.height());
     canvas.setCursor(24, 132);
@@ -173,6 +174,7 @@ void App::scanFonts() {
 void App::run() {
     while (true) {
         M5.update();
+        handlePowerButton();
         processTouch();
         checkAutoSleep();
         checkBleCommands();
@@ -720,7 +722,7 @@ void App::onTap(int x, int y) {
                             saveGlobalSettings();
                             _tabNeedsRender[3] = true;
                             break;
-                        case 6: showMessage("Vink-PaperS3 v1.2.4", 3000); break;
+                        case 6: showMessage("Vink-PaperS3 v1.2.5", 3000); break;
                     }
                 }
                 return;
@@ -1190,8 +1192,7 @@ void App::executeMenuItem(int index) {
                 for (int i = 0; i < 4; i++) _tabNeedsRender[i] = true;
                 break;
             case 11: // 关闭设备
-                showMessage("正在关机...", 1000);
-                M5.Power.powerOff();
+                shutdownDevice("正在关机...");
                 break;
         }
         return;
@@ -1306,8 +1307,7 @@ void App::executeMenuItem(int index) {
             break;
             
         case 14: // 关闭设备
-            showMessage("正在关机...", 1000);
-            M5.Power.powerOff();
+            shutdownDevice("正在关机...");
             break;
             
         case 15: // WiFi配置
@@ -1410,10 +1410,7 @@ void App::drawBatteryIcon(int x, int y) {
     display.drawRect(x + 24, y + 3, 3, 6, 0);
     
     int fillW = (bat.level * 20) / 100;
-    uint8_t color;
-    if (bat.level > 50) color = 0;
-    else if (bat.level > 20) color = 8;
-    else color = 4;
+    uint16_t color = TFT_BLACK;
     
     if (fillW > 0) {
         display.fillRect(x + 2, y + 2, fillW, 8, color);
@@ -1434,7 +1431,50 @@ BatteryInfo BatteryInfo::read() {
     return info;
 }
 
-// ===== 休眠管理 =====
+// ===== 电源 / 休眠管理 =====
+
+void App::handlePowerButton() {
+    // 目标行为：按一次硬件开机；系统起来后，再按一次才关机。
+    // 因此启动后的前几秒必须忽略“开机那次按键”的残留状态，等电源键
+    // 释放后再正式接管，避免刚开机就被固件误判为关机请求。
+    if (!_powerButtonArmed) {
+        if (millis() > 3000 && !M5.BtnPWR.isPressed()) {
+            _powerButtonArmed = true;
+            Serial.println("[Power] BtnPWR armed after boot release");
+        }
+        return;
+    }
+
+    // PaperS3 的侧边电源键在开机后也会被 M5Unified 暴露为 BtnPWR。
+    // 接管后，短按/长按都解释为“保存状态并关机”，不再让它表现成重启。
+    if (M5.BtnPWR.wasClicked() || M5.BtnPWR.wasHold()) {
+        Serial.println("[Power] BtnPWR pressed after boot, shutting down");
+        shutdownDevice("正在关机...");
+    }
+}
+
+void App::shutdownDevice(const char* reason) {
+    if (_reader.isOpen()) {
+        _reader.saveProgress();
+    }
+    _stats.save();
+    if (_uploader.isRunning()) {
+        _uploader.stop();
+    }
+    if (_ble.isRunning()) {
+        _ble.stop();
+    }
+
+    showMessage(reason ? reason : "正在关机...", 800);
+    delay(100);
+    M5.Display.waitDisplay();
+    M5.Power.powerOff();
+
+    // 正常不会走到这里。若 PMIC 未真正断电，退回深睡，避免回到主循环
+    // 造成“按电源键像重启”的体验。
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_36, 0);
+    esp_deep_sleep_start();
+}
 
 void App::checkAutoSleep() {
 #if AUTO_SLEEP_ENABLED

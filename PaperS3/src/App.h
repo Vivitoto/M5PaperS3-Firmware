@@ -32,9 +32,10 @@ private:
     RecentBooks _recent;
     LegadoSync _legado;
     
-    // 空闲计时（休眠）
+    // 空闲计时（休眠）/ 电源键
     unsigned long _lastActivityTime;
     bool _sleepPending;
+    bool _powerButtonArmed;
     
     // 触摸状态
     bool _touching;
@@ -155,7 +156,9 @@ private:
     // 电量显示
     void drawBatteryIcon(int x, int y);
     
-    // 休眠管理
+    // 电源 / 休眠管理
+    void handlePowerButton();
+    void shutdownDevice(const char* reason = "正在关机...");
     void checkAutoSleep();
     void enterSleep();
     void wakeUp();
