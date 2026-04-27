@@ -29,35 +29,41 @@ bool App::init() {
     Serial.begin(115200);
     delay(500);
     Serial.println("\n[Vink-PaperS3] Starting...");
+    Serial.printf("[Boot] PSRAM size=%u free=%u\n", ESP.getPsramSize(), ESP.getFreePsram());
     
     auto cfg = M5.config();
-    cfg.external_display.module_display = true;
+    // Follow the proven ReadPaper/PaperS3 startup path: let M5Unified/M5GFX
+    // autodetect the built-in PaperS3 e-paper panel. Forcing the external
+    // module display path can leave M5.Display uninitialized on PaperS3.
+    cfg.clear_display = false;
     M5.begin(cfg);
+    delay(50);
     
     if (!initDisplay()) {
         Serial.println("[App] Display init failed");
         return false;
     }
     
-    if (!initSD()) {
-        showMessage("SD Card Error!", 5000);
-        Serial.println("[App] SD init failed");
-        return false;
+    bool sdReady = initSD();
+    if (!sdReady) {
+        showMessage("SD Card Error - continuing", 3000);
+        Serial.println("[App] SD init failed, continuing for boot diagnostics");
     }
     
     if (!initFont()) {
-        showMessage("Font Error!", 5000);
-        Serial.println("[App] Font init failed");
-        return false;
+        showMessage("Font Error - using fallback", 2000);
+        Serial.println("[App] Font init failed, continuing with built-in fallback if available");
     }
     
-    if (!SD.exists(BOOKS_DIR)) SD.mkdir(BOOKS_DIR);
-    if (!SD.exists(PROGRESS_DIR)) SD.mkdir(PROGRESS_DIR);
+    if (sdReady) {
+        if (!SD.exists(BOOKS_DIR)) SD.mkdir(BOOKS_DIR);
+        if (!SD.exists(PROGRESS_DIR)) SD.mkdir(PROGRESS_DIR);
+    }
     
     // 扫描可用字体
-    scanFonts();
+    if (sdReady) scanFonts();
     
-    _browser.scan(BOOKS_DIR);
+    if (sdReady) _browser.scan(BOOKS_DIR);
     _state = AppState::TAB_READING;
     _activeTab = 0;
     for (int i = 0; i < 4; i++) _tabNeedsRender[i] = true;
@@ -77,31 +83,65 @@ bool App::init() {
 
 bool App::initDisplay() {
     auto& display = M5.Display;
+    display.powerSaveOff();
+    display.setEpdMode(epd_mode_t::epd_fastest);
+    display.setColorDepth(4); // ReadPaper TEXT_COLORDEPTH
+    display.setRotation(2);   // ReadPaper default portrait rotation
+    delay(20);
+
     if (display.width() == 0 || display.height() == 0) {
         Serial.println("[Display] Display not detected");
         return false;
     }
     Serial.printf("[Display] %dx%d\n", display.width(), display.height());
-    display.clear();
-    display.setTextSize(1);
-    display.setTextColor(0, 15);
-    showMessage("正在启动...", 1000);
+
+    // ReadPaper-style draw path: render into a 4bpp M5Canvas and pushSprite,
+    // instead of drawing directly to M5.Display then calling display().
+    M5Canvas canvas(&display);
+    canvas.setColorDepth(4);
+    canvas.createSprite(SCREEN_WIDTH, SCREEN_HEIGHT);
+    canvas.fillSprite(15);
+    canvas.setTextColor(0, 15);
+    canvas.setTextSize(2);
+    canvas.setCursor(24, 32);
+    canvas.println("Vink-PaperS3");
+    canvas.setTextSize(1);
+    canvas.setCursor(24, 76);
+    canvas.println("v1.2.4 BW shell UI test");
+    canvas.setCursor(24, 104);
+    canvas.printf("Display %dx%d", display.width(), display.height());
+    canvas.setCursor(24, 132);
+    canvas.printf("PSRAM %u KB", ESP.getPsramSize() / 1024);
+    canvas.drawRect(24, 180, 180, 80, 0);
+    canvas.fillRect(230, 180, 180, 80, 0);
+    display.waitDisplay();
+    canvas.pushSprite(0, 0);
+    display.waitDisplay();
+    delay(4000);
     return true;
 }
 
 bool App::initSD() {
-    Serial.println("[SD] Initializing...");
-    SPI.begin(14, 39, 38, 4);
-    if (!SD.begin(4, SPI, 4000000)) {
-        Serial.println("[SD] SD.begin(4) failed, trying default...");
-        SPI.end();
-        if (!SD.begin()) {
-            Serial.println("[SD] Default config failed");
-            return false;
+    Serial.println("[SD] Initializing PaperS3 SD SPI bus...");
+    // PaperS3 matches ReadPaper's verified pinout:
+    // CS=47, SCK=39, MOSI=38, MISO=40. The old CS=4/SCK=14 path is for
+    // other ESP32 boards and can make startup look dead after flashing.
+    constexpr int SD_CS = 47;
+    constexpr int SD_SCK = 39;
+    constexpr int SD_MOSI = 38;
+    constexpr int SD_MISO = 40;
+    SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+    const uint32_t freqs[] = {25000000u, 8000000u, 4000000u};
+    for (uint32_t freq : freqs) {
+        Serial.printf("[SD] Trying SPI freq=%u...\n", freq);
+        if (SD.begin(SD_CS, SPI, freq)) {
+            Serial.println("[SD] OK");
+            return true;
         }
+        delay(50);
     }
-    Serial.println("[SD] OK");
-    return true;
+    Serial.println("[SD] PaperS3 SPI config failed");
+    return false;
 }
 
 bool App::initFont() {
@@ -375,7 +415,7 @@ void App::handleRefreshMenu() {
     }
     
     display.setCursor(200, 400);
-    display.println("对标梦西游：速度优先 / 均衡 / 显示优先");
+    display.println("Vink 刷新策略：速度优先 / 均衡 / 显示优先");
     display.setCursor(200, 450);
     display.println("← → 切换 | 点击确认 | 上滑返回");
     
@@ -680,7 +720,7 @@ void App::onTap(int x, int y) {
                             saveGlobalSettings();
                             _tabNeedsRender[3] = true;
                             break;
-                        case 6: showMessage("Vink-PaperS3 v2.0", 3000); break;
+                        case 6: showMessage("Vink-PaperS3 v1.2.4", 3000); break;
                     }
                 }
                 return;
@@ -1833,8 +1873,8 @@ void App::saveLegadoConfig() {
 
 void App::renderTopTabs() {
     auto& display = M5.Display;
-    const char* tabs[] = {"读书", "书架", "传输", "设置"};
-    const char* icons[] = {"📖", "📚", "🛜", "⚙️"};
+    const char* tabs[] = {"Read", "Books", "Send", "Set"};
+    const char* icons[] = {nullptr, nullptr, nullptr, nullptr};
     int16_t tabW = SCREEN_WIDTH / 4;
     
     for (int i = 0; i < 4; i++) {

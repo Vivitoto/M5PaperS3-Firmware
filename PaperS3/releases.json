@@ -5,6 +5,32 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v1.2.4",
+      "name": "Vink-PaperS3 v1.2.4 BW shell test",
+      "summary": "套用 ReadPaper 的 PaperS3 显示初始化路径，并临时切换黑白主界面以验证灰度网纹问题。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v1.2.4",
+      "changelog": "## Vink-PaperS3 v1.2.4 BW shell test\n\n### ReadPaper 显示路径\n- 使用 ReadPaper/PaperS3 已验证的启动参数：devkitm、OPI PSRAM、M5Unified 0.2.11、`clear_display=false`。\n- 屏幕改为 PaperS3 竖屏 framebuffer：`540x960`、`rotation=2`、`colorDepth=4`、`epd_fastest`。\n- 开机诊断页改为 `M5Canvas` + `pushSprite(0,0)` 绘制，已验证可清晰显示 Display/PSRAM 信息。\n\n### 启动容错\n- SD 卡初始化失败时不再停止启动，改为显示 `SD Card Error - continuing` 后继续进入系统，便于无 SD 调试。\n- 字体初始化失败时继续使用 fallback，避免早期 bring-up 卡死。\n\n### 黑白主界面测试\n- 将主界面临时切换为高对比黑白配色，避免 PaperS3 大面积灰度填充显示成网纹。\n- 顶部标签临时改为 ASCII 文案 `Read / Books / Send / Set`，并禁用 emoji 图标，以排除 fallback 字体/emoji 渲染干扰。\n\n### 烧录包\n- App/Vink Flasher 默认继续使用 `full` 完整 16MB 镜像，从 `0x0` 写入。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v1.2.4-bw-shell-test-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.4/Vink-PaperS3-v1.2.4-bw-shell-test-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        },
+        "ota": {
+          "name": "Vink-PaperS3-v1.2.4-bw-shell-test-ota.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.4/Vink-PaperS3-v1.2.4-bw-shell-test-ota.bin",
+          "size": 1904064,
+          "flashOffset": 65536
+        },
+        "spiffs": {
+          "name": "Vink-PaperS3-v1.2.4-bw-shell-test-spiffs.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.4/Vink-PaperS3-v1.2.4-bw-shell-test-spiffs.bin",
+          "size": 4128768
+        }
+      }
+    },
+    {
       "version": "v1.2.0",
       "name": "Vink-PaperS3 v1.2.0",
       "summary": "Vink-PaperS3 v1.2.0",

@@ -6,25 +6,27 @@
 // 配色：浅灰白纸质感，墨水屏原生风格
 
 namespace UITheme {
-    // 背景色（16级灰度）
+    // PaperS3's 4bpp gray fill is rendered as a visible halftone pattern.
+    // Keep the shell UI pure black/white until the full ReadPaper canvas path
+    // is adopted; otherwise large gray backgrounds look like screen noise.
     constexpr uint8_t BG_WHITE     = 15;  // 纯白
-    constexpr uint8_t BG_LIGHT     = 14;  // 浅灰（主背景）
-    constexpr uint8_t BG_MID       = 12;  // 中灰（卡片背景）
-    constexpr uint8_t BG_DARK      = 8;   // 深灰（分隔线）
+    constexpr uint8_t BG_LIGHT     = 15;  // 主背景保持纯白
+    constexpr uint8_t BG_MID       = 15;  // 卡片背景保持纯白
+    constexpr uint8_t BG_DARK      = 0;   // 深色区域
     
     // 文字色
     constexpr uint8_t TEXT_BLACK   = 0;   // 纯黑（标题）
-    constexpr uint8_t TEXT_DARK    = 2;   // 深灰（正文）
-    constexpr uint8_t TEXT_MID     = 5;   // 中灰（次要文字）
-    constexpr uint8_t TEXT_LIGHT   = 10;  // 浅灰（禁用/提示）
+    constexpr uint8_t TEXT_DARK    = 0;   // 正文
+    constexpr uint8_t TEXT_MID     = 0;   // 次要文字先保持高对比
+    constexpr uint8_t TEXT_LIGHT   = 8;   // 禁用/提示
     
     // 强调色
-    constexpr uint8_t ACCENT       = 3;   // 深灰强调（选中态）
-    constexpr uint8_t ACCENT_LIGHT = 6;   // 浅灰强调
+    constexpr uint8_t ACCENT       = 0;   // 选中态黑色
+    constexpr uint8_t ACCENT_LIGHT = 0;
     
     // 边框/分隔线
-    constexpr uint8_t BORDER       = 11;  // 浅灰边框
-    constexpr uint8_t BORDER_LIGHT = 13;  // 更浅边框
+    constexpr uint8_t BORDER       = 0;
+    constexpr uint8_t BORDER_LIGHT = 0;
     
     // 尺寸常量
     constexpr int16_t TOP_TAB_H    = 50;   // 顶部标签高度

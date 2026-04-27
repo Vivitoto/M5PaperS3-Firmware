@@ -483,7 +483,7 @@ void EbookReader::renderPage() {
 
 void EbookReader::renderPageFull() {
     auto& display = M5.Display;
-    // 对标梦西游：周期性使用 GC16 高质量刷新清残影。
+    // Vink 刷新策略：周期性使用 GC16 高质量刷新清残影。
     display.setEpdMode(epd_mode_t::epd_quality);
     display.clear();
     if (_hasPreload && _preloadPage == _currentPage) {
@@ -498,7 +498,7 @@ void EbookReader::renderPageFull() {
 
 void EbookReader::renderPageFast() {
     auto& display = M5.Display;
-    // 对标梦西游：快速翻页按策略动态选择波形。
+    // Vink 刷新策略：快速翻页按策略动态选择波形。
     // 极速=DU4(最快/低对比度)，均衡=DU(快/低残影)，清晰=GL16(文本抗锯齿更好)。
     switch (_refreshStrategy.frequency) {
         case RefreshFrequency::FREQ_LOW:
