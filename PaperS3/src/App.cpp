@@ -4,6 +4,10 @@
 
 using namespace UITheme;
 
+static void prepareShellFrame();
+static void commitShellFrame();
+static void drawBackHeader(const char* title, const char* hint = "点 < / 右滑 / 上滑返回");
+
 App::App() : _state(AppState::INIT), _reader(_font), _touching(false),
              _menuIndex(0), _layoutEditorIndex(0), _chapterMenuIndex(0), _chapterMenuScroll(0),
              _bookmarkMenuIndex(0), _bookmarkMenuScroll(0),
@@ -11,6 +15,7 @@ App::App() : _state(AppState::INIT), _reader(_font), _touching(false),
              _activeTab(0), _libraryPage(0), _libraryTotalPages(1), _librarySelected(0),
              _gotoPageCursor(0),
              _lastActivityTime(0), _sleepPending(false), _powerButtonArmed(false),
+             _shutdownInProgress(false), _powerButtonPressStart(0),
              _sleepTimeoutMin(AUTO_SLEEP_DEFAULT_MIN),
              _fontCount(0) {
     memset(_gotoPageInput, 0, sizeof(_gotoPageInput));
@@ -46,12 +51,12 @@ bool App::init() {
     
     bool sdReady = initSD();
     if (!sdReady) {
-        showMessage("SD Card Error - continuing", 3000);
+        showMessage("SD卡异常，继续启动", 3000);
         Serial.println("[App] SD init failed, continuing for boot diagnostics");
     }
     
     if (!initFont()) {
-        showMessage("Font Error - using fallback", 2000);
+        showMessage("字体异常，使用备用字体", 2000);
         Serial.println("[App] Font init failed, continuing with built-in fallback if available");
     }
     
@@ -108,7 +113,7 @@ bool App::initDisplay() {
     canvas.println("Vink-PaperS3");
     canvas.setTextSize(1);
     canvas.setCursor(24, 76);
-    canvas.println("v1.2.5 high contrast UI test");
+    canvas.println("v1.2.8 中文界面测试");
     canvas.setCursor(24, 104);
     canvas.printf("Display %dx%d", display.width(), display.height());
     canvas.setCursor(24, 132);
@@ -564,6 +569,45 @@ void App::processTouch() {
 
 void App::onTap(int x, int y) {
     Serial.printf("[Touch] Tap at (%d, %d)\n", x, y);
+
+    // 子页面左上角返回按钮：所有设置/统计/菜单页统一可退回上一级。
+    if (!isTabState(_state) && _state != AppState::READER && y < 92 && x < 120) {
+        navigateBack();
+        return;
+    }
+
+    if (_state == AppState::SETTINGS_REFRESH) {
+        int startY = 116;
+        int itemH = 128;
+        int gap = 20;
+        int idx = (y - startY) / (itemH + gap);
+        if (idx >= 0 && idx < 3) {
+            _reader.setRefreshFrequency((RefreshFrequency)idx);
+            handleSettingsRefresh();
+        }
+        return;
+    }
+
+    if (_state == AppState::SETTINGS_FONT) {
+        int idx = (y - 112) / 92;
+        if (idx >= 0 && idx < _fontCount) {
+            if (_font.loadFont(_fontPaths[idx])) showMessage("字体已切换", 800);
+            _state = AppState::TAB_SETTINGS;
+            _tabNeedsRender[3] = true;
+        }
+        return;
+    }
+
+    if (_state == AppState::SETTINGS_LAYOUT) {
+        _layoutEditorIndex = ((_layoutEditorIndex + 1) % 5);
+        handleSettingsLayout();
+        return;
+    }
+
+    if (_state == AppState::SETTINGS_WIFI || _state == AppState::SETTINGS_LEGADO) {
+        navigateBack();
+        return;
+    }
     
     // ===== 新 UI 标签页处理 =====
     if (_state == AppState::TAB_READING || _state == AppState::TAB_LIBRARY ||
@@ -588,12 +632,8 @@ void App::onTap(int x, int y) {
         switch (_state) {
             case AppState::TAB_READING: {
                 int recentCount = _recent.getCount();
-                int cy = contentTop();
-                // 统计卡片区域不处理
-                cy += 90;
-                cy += 35; // 标题
-                // 大封面
-                if (recentCount > 0 && y > cy && y < cy + 200 && x > 40 && x < 320) {
+                int cardY = contentTop() + 34;
+                if (recentCount > 0 && x >= contentLeft() && x <= contentRight() && y >= cardY && y <= cardY + 210) {
                     const RecentBook* book = _recent.getBook(0);
                     if (book && _reader.openBook(book->path)) {
                         _stats.startReading(book->name);
@@ -602,41 +642,23 @@ void App::onTap(int x, int y) {
                     }
                     return;
                 }
-                cy += 220;
-                // 小封面
-                if (recentCount > 1 && y > cy && y < cy + 130) {
-                    int smallW = 160;
-                    int gap = 15;
-                    int maxShow = min(3, recentCount - 1);
-                    int startX = (SCREEN_WIDTH - (maxShow * smallW + (maxShow - 1) * gap)) / 2;
-                    int clickedIdx = (x - startX) / (smallW + gap);
-                    if (clickedIdx >= 0 && clickedIdx < maxShow) {
-                        const RecentBook* book = _recent.getBook(clickedIdx + 1);
-                        if (book && _reader.openBook(book->path)) {
-                            _stats.startReading(book->name);
-                            _state = AppState::READER;
-                            _reader.renderPage();
-                        }
-                    }
-                    return;
-                }
                 return;
             }
             
             case AppState::TAB_LIBRARY: {
-                int cols = 3;
-                int coverW = 200;
-                int coverH = 130;
-                int gapX = (contentWidth() - cols * coverW) / (cols + 1);
-                int gapY = 15;
-                int startX = contentLeft() + gapX;
-                int cy = contentTop() + 25;
+                int cols = 2;
+                int cardW = (contentWidth() - 14) / 2;
+                int cardH = 156;
+                int gapX = 14;
+                int gapY = 16;
+                int startX = contentLeft();
+                int cy = contentTop() + 42;
                 
-                int clickedCol = (x - startX) / (coverW + gapX);
-                int clickedRow = (y - cy) / (coverH + gapY);
-                if (clickedCol >= 0 && clickedCol < cols && clickedRow >= 0 && clickedRow < 3) {
+                int clickedCol = (x - startX) / (cardW + gapX);
+                int clickedRow = (y - cy) / (cardH + gapY);
+                if (clickedCol >= 0 && clickedCol < cols && clickedRow >= 0 && clickedRow < 4) {
                     int localIdx = clickedRow * cols + clickedCol;
-                    int idx = _libraryPage * 9 + localIdx;
+                    int idx = _libraryPage * 8 + localIdx;
                     if (idx < _browser.getItemCount()) {
                         _librarySelected = idx;
                         const FileItem* item = _browser.getItem(idx);
@@ -658,15 +680,21 @@ void App::onTap(int x, int y) {
             }
             
             case AppState::TAB_TRANSFER: {
-                int cardW = (contentWidth() - 15) / 2;
-                int cardH = 110;
-                int gap = 15;
-                int cy = contentTop() + 40;
-                
-                int clickedCol = (x - contentLeft()) / (cardW + gap);
-                int clickedRow = (y - cy) / (cardH + gap);
-                int clickedIdx = clickedRow * 2 + clickedCol;
-                
+                const int itemH = 84;
+                const int gap = 10;
+                int drawY = contentTop() + 44;
+                int clickedIdx = -1;
+                const int groupBefore[] = {2, 3, 4};
+                for (int i = 0; i < 6; i++) {
+                    bool newGroup = (i == 0 || i == groupBefore[0] || i == groupBefore[1] || i == groupBefore[2]);
+                    if (newGroup) drawY += 26;
+                    if (y >= drawY && y <= drawY + itemH) {
+                        clickedIdx = i;
+                        break;
+                    }
+                    drawY += itemH + gap;
+                }
+
                 switch (clickedIdx) {
                     case 0:
                         if (_uploader.isRunning()) {
@@ -679,6 +707,12 @@ void App::onTap(int x, int y) {
                         _tabNeedsRender[2] = true;
                         break;
                     case 1:
+                        _state = AppState::SETTINGS_WIFI;
+                        break;
+                    case 2:
+                        _state = AppState::SETTINGS_LEGADO;
+                        break;
+                    case 3:
                         if (_ble.isRunning()) {
                             _ble.stop();
                             showMessage("蓝牙翻页已关闭", 1500);
@@ -687,12 +721,6 @@ void App::onTap(int x, int y) {
                             showMessage("蓝牙翻页已开启", 1500);
                         }
                         _tabNeedsRender[2] = true;
-                        break;
-                    case 2:
-                        _state = AppState::SETTINGS_LEGADO;
-                        break;
-                    case 3:
-                        _state = AppState::SETTINGS_WIFI;
                         break;
                     case 4:
                         _state = AppState::READING_STATS;
@@ -705,10 +733,21 @@ void App::onTap(int x, int y) {
             }
             
             case AppState::TAB_SETTINGS: {
-                int itemH = 55;
-                int gap = 8;
-                int cy = contentTop() + 40 - _settingsScroll;
-                int clickedIdx = (y - cy) / (itemH + gap);
+                const int itemH = 76;
+                const int gap = 10;
+                int drawY = contentTop() + 44 - _settingsScroll;
+                int clickedIdx = -1;
+                const int groupBefore[] = {0, 3, 5};
+                for (int i = 0; i < 7; i++) {
+                    bool newGroup = (i == groupBefore[0] || i == groupBefore[1] || i == groupBefore[2]);
+                    if (newGroup) drawY += 26;
+                    if (y >= drawY && y <= drawY + itemH) {
+                        clickedIdx = i;
+                        break;
+                    }
+                    drawY += itemH + gap;
+                }
+
                 if (clickedIdx >= 0 && clickedIdx < 7) {
                     switch (clickedIdx) {
                         case 0: _layoutEditorIndex = 0; _state = AppState::SETTINGS_LAYOUT; break;
@@ -722,7 +761,7 @@ void App::onTap(int x, int y) {
                             saveGlobalSettings();
                             _tabNeedsRender[3] = true;
                             break;
-                        case 6: showMessage("Vink-PaperS3 v1.2.5", 3000); break;
+                        case 6: showMessage("Vink-PaperS3 v1.2.8", 3000); break;
                     }
                 }
                 return;
@@ -897,6 +936,12 @@ void App::onTap(int x, int y) {
 
 void App::onSwipe(int dx, int dy) {
     Serial.printf("[Touch] Swipe dx=%d, dy=%d\n", dx, dy);
+
+    // 子页面右滑返回上一级；比“上滑返回”更符合电子书/手机习惯。
+    if (!isTabState(_state) && _state != AppState::READER && dx > 90) {
+        navigateBack();
+        return;
+    }
     
     // 新UI标签页：左右滑动切换标签
     if (isTabState(_state)) {
@@ -907,6 +952,12 @@ void App::onSwipe(int dx, int dy) {
             // 左滑：下一个标签
             switchTab(_activeTab + 1);
         }
+        return;
+    }
+
+    if (_state == AppState::SETTINGS_LAYOUT) {
+        adjustLayoutParameter(dx > 0 ? 1 : -1);
+        handleSettingsLayout();
         return;
     }
     
@@ -991,6 +1042,11 @@ void App::onSwipe(int dx, int dy) {
 }
 
 void App::onVerticalSwipe(int dy) {
+    if (!isTabState(_state) && _state != AppState::READER && dy < -90) {
+        navigateBack();
+        return;
+    }
+
     // 新UI：设置页面滚动
     if (_state == AppState::TAB_SETTINGS) {
         if (dy > 30) {
@@ -1433,27 +1489,59 @@ BatteryInfo BatteryInfo::read() {
 
 // ===== 电源 / 休眠管理 =====
 
+static constexpr int PAPER_S3_POWER_OFF_PIN = 44;
+static constexpr int PAPER_S3_POWER_KEY_PIN = 36;
+
+static void pulsePaperS3PowerOffPin() {
+    // CrossPoint/ReadPaper 类 PaperS3 关机路径：GPIO44 给 PMIC 一个高脉冲。
+    // M5Unified 的 powerOff 在部分情况下会退到 deep sleep/重启观感；这里显式
+    // 先走 PaperS3 硬件关机脉冲，再让 M5Unified 做兜底。
+    pinMode(PAPER_S3_POWER_OFF_PIN, OUTPUT);
+    digitalWrite(PAPER_S3_POWER_OFF_PIN, HIGH);
+    delay(150);
+    digitalWrite(PAPER_S3_POWER_OFF_PIN, LOW);
+    delay(100);
+}
+
 void App::handlePowerButton() {
+    if (_shutdownInProgress) return;
+
     // 目标行为：按一次硬件开机；系统起来后，再按一次才关机。
     // 因此启动后的前几秒必须忽略“开机那次按键”的残留状态，等电源键
     // 释放后再正式接管，避免刚开机就被固件误判为关机请求。
     if (!_powerButtonArmed) {
         if (millis() > 3000 && !M5.BtnPWR.isPressed()) {
             _powerButtonArmed = true;
+            _powerButtonPressStart = 0;
             Serial.println("[Power] BtnPWR armed after boot release");
         }
         return;
     }
 
-    // PaperS3 的侧边电源键在开机后也会被 M5Unified 暴露为 BtnPWR。
-    // 接管后，短按/长按都解释为“保存状态并关机”，不再让它表现成重启。
+    // 不等 wasClicked() 释放后才处理：PaperS3 的 PMIC 长按可能先触发硬件重启。
+    // 接管后只要检测到一次稳定按下，就立即进入保存+关机流程。
+    if (M5.BtnPWR.isPressed()) {
+        if (_powerButtonPressStart == 0) {
+            _powerButtonPressStart = millis();
+        }
+        if (millis() - _powerButtonPressStart > 80) {
+            Serial.println("[Power] BtnPWR pressed, shutting down immediately");
+            shutdownDevice("正在关机...");
+        }
+        return;
+    }
+
+    _powerButtonPressStart = 0;
     if (M5.BtnPWR.wasClicked() || M5.BtnPWR.wasHold()) {
-        Serial.println("[Power] BtnPWR pressed after boot, shutting down");
+        Serial.println("[Power] BtnPWR click/hold event, shutting down");
         shutdownDevice("正在关机...");
     }
 }
 
 void App::shutdownDevice(const char* reason) {
+    if (_shutdownInProgress) return;
+    _shutdownInProgress = true;
+
     if (_reader.isOpen()) {
         _reader.saveProgress();
     }
@@ -1465,14 +1553,31 @@ void App::shutdownDevice(const char* reason) {
         _ble.stop();
     }
 
-    showMessage(reason ? reason : "正在关机...", 800);
-    delay(100);
+    // 参考 ReadPaper：先完整刷新关机提示并等待电子纸完成刷新，再断电。
+    showMessage(reason ? reason : "正在关机...", 1200);
+    delay(300);
+    M5.Display.waitDisplay();
+    delay(500);
+
+    // 若用户仍按着电源键，先等释放，避免 deep sleep 兜底被 GPIO36 立即唤醒，
+    // 看起来像“按电源键重启”。最多等 3 秒，防止异常卡死。
+    unsigned long waitStart = millis();
+    while (M5.BtnPWR.isPressed() && millis() - waitStart < 3000) {
+        M5.update();
+        delay(30);
+    }
+
+    pulsePaperS3PowerOffPin();
     M5.Display.waitDisplay();
     M5.Power.powerOff();
 
-    // 正常不会走到这里。若 PMIC 未真正断电，退回深睡，避免回到主循环
-    // 造成“按电源键像重启”的体验。
-    esp_sleep_enable_ext0_wakeup(GPIO_NUM_36, 0);
+    // 正常不会走到这里。若 PMIC 未真正断电，退回深睡；进入深睡前再次确保
+    // 电源键已释放，否则 ext0 低电平会立刻唤醒，表现成重启。
+    waitStart = millis();
+    while (digitalRead(PAPER_S3_POWER_KEY_PIN) == LOW && millis() - waitStart < 3000) {
+        delay(30);
+    }
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)PAPER_S3_POWER_KEY_PIN, 0);
     esp_deep_sleep_start();
 }
 
@@ -1739,53 +1844,33 @@ void App::handleWiFiUpload() {
 
 void App::handleReadingStats() {
     auto& display = M5.Display;
-    display.clear();
-    
-    display.setTextSize(2);
-    display.setCursor(340, 20);
-    display.println("阅读统计");
-    
+    prepareShellFrame();
+    drawBackHeader("阅读统计", "统计当前书籍和累计阅读");
+
+    int x = contentLeft();
+    int y = 120;
+    UITheme::drawCard(x, y, contentWidth(), 280, BG_WHITE, BORDER_LIGHT);
     display.setTextSize(1);
-    int y = 80;
-    
-    // 当前书
+    display.setTextColor(TEXT_BLACK, BG_WHITE);
     if (_reader.isOpen()) {
         BookStats book = _stats.getCurrentBookStats();
-        display.setCursor(150, y);
-        display.printf("当前书籍: %s", _reader.getBookPath());
-        y += 35;
-        display.setCursor(150, y);
-        display.printf("累计翻页: %d 页", book.totalPagesRead);
-        y += 35;
-        display.setCursor(150, y);
-        display.printf("累计阅读: %s", _stats.formatTime(book.totalSeconds).c_str());
-        y += 35;
-        display.setCursor(150, y);
-        display.printf("打开次数: %d", book.readCount);
-        y += 50;
+        display.setCursor(x + 18, y + 24);
+        display.printf("当前书翻页：%d 页", book.totalPagesRead);
+        display.setCursor(x + 18, y + 60);
+        display.printf("当前书阅读：%s", _stats.formatTime(book.totalSeconds).c_str());
+        display.setCursor(x + 18, y + 96);
+        display.printf("打开次数：%d", book.readCount);
+    } else {
+        display.setCursor(x + 18, y + 24);
+        display.print("当前没有打开书籍");
     }
-    
-    // 总统计
-    display.setCursor(150, y);
-    display.println("--- 全局统计 ---");
-    y += 35;
-    display.setCursor(150, y);
-    display.printf("总阅读时长: %s", _stats.formatTime(_stats.getTotalReadingSeconds()).c_str());
-    y += 35;
-    display.setCursor(150, y);
-    display.printf("总翻页数: %d", _stats.getTotalPagesRead());
-    y += 35;
-    display.setCursor(150, y);
-    display.printf("今日阅读: %s", _stats.formatTime(_stats.getTodaySeconds()).c_str());
-    y += 35;
-    display.setCursor(150, y);
-    display.printf("今日翻页: %d", _stats.getTodayPages());
-    y += 50;
-    
-    display.setCursor(250, 450);
-    display.println("点击返回阅读");
-    
-    display.display();
+    display.setCursor(x + 18, y + 154);
+    display.printf("累计阅读：%s", _stats.formatTime(_stats.getTotalReadingSeconds()).c_str());
+    display.setCursor(x + 18, y + 190);
+    display.printf("累计翻页：%d 页", _stats.getTotalPagesRead());
+    display.setCursor(x + 18, y + 226);
+    display.printf("今日阅读：%s / %d 页", _stats.formatTime(_stats.getTodaySeconds()).c_str(), _stats.getTodayPages());
+    commitShellFrame();
 }
 
 // ===== BLE 翻页器检查 =====
@@ -1802,49 +1887,63 @@ void App::checkBleCommands() {
 
 void App::handleLegadoSync() {
     auto& display = M5.Display;
-    display.clear();
+    prepareShellFrame();
+    drawBackHeader("Legado同步", "WebDAV 阅读进度同步");
+
+    int x = contentLeft();
+    int y = 124;
+    UITheme::drawCard(x, y, contentWidth(), 220, BG_WHITE, BORDER_LIGHT);
     display.setTextSize(2);
-    display.setCursor(320, 20);
-    display.println("Legado同步");
+    display.setTextColor(TEXT_BLACK, BG_WHITE);
+    display.setCursor(x + 18, y + 22);
+    display.print(_legadoConfigured ? "已配置" : "未配置");
     display.setTextSize(1);
-    if (!_legadoConfigured) {
-        display.setCursor(250, 200);
-        display.println("未配置WebDav服务器");
-        display.setCursor(200, 240);
-        display.println("请在系统设置中配置");
-    } else {
-        display.setCursor(300, 100);
-        display.println("正在同步...");
+    display.setCursor(x + 18, y + 76);
+    display.print(_legadoConfigured ? _legadoHost : "请在SD卡根目录放置 /legado_config.json");
+
+    if (_legadoConfigured) {
         syncLegadoProgress();
-        display.setCursor(300, 150);
-        display.println("同步完成");
+        display.setCursor(x + 18, y + 128);
+        display.print("同步完成");
+    } else {
+        display.setCursor(x + 18, y + 128);
+        display.print("用于和阅读/Legado同步阅读进度");
     }
-    display.setCursor(300, 400);
-    display.println("点击返回阅读");
-    display.display();
+    commitShellFrame();
 }
 
 void App::handleWiFiConfig() {
-    // simplified - just show status
     auto& display = M5.Display;
-    display.clear();
+    prepareShellFrame();
+    drawBackHeader("WiFi配置", "在SD卡根目录编辑配置文件");
+
+    int x = contentLeft();
+    int y = 124;
+    UITheme::drawCard(x, y, contentWidth(), 270, BG_WHITE, BORDER_LIGHT);
     display.setTextSize(2);
-    display.setCursor(320, 20);
-    display.println("WiFi配置");
+    display.setTextColor(TEXT_BLACK, BG_WHITE);
+    display.setCursor(x + 18, y + 20);
+    display.print(_wifiConfigured ? "已配置" : "未配置");
     display.setTextSize(1);
-    display.setCursor(300, 100);
-    display.println("请在SD卡根目录放置");
-    display.setCursor(280, 140);
-    display.println("/wifi_config.json");
-    display.setCursor(300, 200);
-    display.println("格式: {");
-    display.setCursor(320, 240);
-    display.println("\"ssid\":\"你的WiFi\",");
-    display.setCursor(320, 280);
-    display.println("\"pass\":\"密码\"");
-    display.setCursor(300, 320);
-    display.println("}");
-    display.display();
+    display.setCursor(x + 18, y + 72);
+    display.print("请在SD卡根目录创建：");
+    display.setCursor(x + 18, y + 104);
+    display.print("/wifi_config.json");
+    display.setCursor(x + 18, y + 148);
+    display.print("{\"ssid\":\"你的WiFi\",");
+    display.setCursor(x + 18, y + 178);
+    display.print(" \"pass\":\"密码\"}");
+    display.setCursor(x + 18, y + 222);
+    display.print("保存后重启或重新进入页面生效");
+
+    if (_wifiConfigured) {
+        UITheme::drawCard(x, y + 300, contentWidth(), 90, BG_WHITE, BORDER_LIGHT);
+        display.setTextSize(1);
+        display.setTextColor(TEXT_BLACK, BG_WHITE);
+        display.setCursor(x + 18, y + 330);
+        display.printf("当前WiFi：%s", _wifiSsid);
+    }
+    commitShellFrame();
 }
 
 void App::syncLegadoProgress() {
@@ -1909,14 +2008,82 @@ void App::saveLegadoConfig() {
     }
 }
 
-// ===== Crosslink 风格新 UI =====
+// ===== PaperS3 竖屏 UI =====
+
+static void prepareShellFrame() {
+    auto& display = M5.Display;
+    display.waitDisplay();
+    display.setEpdMode(epd_mode_t::epd_fastest);
+    display.fillScreen(BG_LIGHT);
+}
+
+static void commitShellFrame() {
+    auto& display = M5.Display;
+    display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+}
+
+static void drawBackHeader(const char* title, const char* hint) {
+    auto& display = M5.Display;
+    display.setTextSize(2);
+    display.setTextColor(TEXT_BLACK, BG_LIGHT);
+    display.setCursor(20, 22);
+    display.print("<");
+    display.setCursor(64, 22);
+    display.print(title);
+    display.setTextSize(1);
+    display.setTextColor(TEXT_MID, BG_LIGHT);
+    display.setCursor(20, 58);
+    display.print(hint);
+    display.drawLine(20, 82, SCREEN_WIDTH - 20, 82, BORDER);
+    display.drawLine(20, 83, SCREEN_WIDTH - 20, 83, BORDER);
+    display.setTextColor(TEXT_BLACK, BG_LIGHT);
+}
+
+void App::navigateBack() {
+    switch (_state) {
+        case AppState::SETTINGS_LAYOUT:
+        case AppState::SETTINGS_REFRESH:
+        case AppState::SETTINGS_FONT:
+        case AppState::SETTINGS_WIFI:
+        case AppState::SETTINGS_LEGADO:
+            _activeTab = 3;
+            _state = AppState::TAB_SETTINGS;
+            _tabNeedsRender[3] = true;
+            break;
+        case AppState::WIFI_UPLOAD:
+        case AppState::READING_STATS:
+            if (_reader.isOpen()) {
+                _state = AppState::READER;
+                _reader.renderPage();
+            } else {
+                _activeTab = 2;
+                _state = AppState::TAB_TRANSFER;
+                _tabNeedsRender[2] = true;
+            }
+            break;
+        case AppState::CHAPTER_LIST:
+        case AppState::BOOKMARK_LIST:
+        case AppState::GOTO_PAGE:
+        case AppState::READER_MENU:
+            _state = AppState::READER;
+            if (_reader.isOpen()) _reader.renderPage();
+            break;
+        default:
+            if (!isTabState(_state)) {
+                _state = AppState::TAB_READING;
+                _activeTab = 0;
+                _tabNeedsRender[0] = true;
+            }
+            break;
+    }
+}
 
 void App::renderTopTabs() {
     auto& display = M5.Display;
-    const char* tabs[] = {"Read", "Books", "Send", "Set"};
+    const char* tabs[] = {"阅读", "书架", "传输", "设置"};
     const char* icons[] = {nullptr, nullptr, nullptr, nullptr};
     int16_t tabW = SCREEN_WIDTH / 4;
-    
+
     for (int i = 0; i < 4; i++) {
         bool active = (i == _activeTab);
         UITheme::drawTabBookmark(i * tabW, 0, tabW, TOP_TAB_H, active, tabs[i], icons[i]);
@@ -1948,167 +2115,150 @@ bool App::isTabState(AppState state) {
            state == AppState::TAB_SETTINGS;
 }
 
-// ===== 📖 读书主页（1+3 封面 + 统计卡片）=====
+// ===== 📖 读书主页（PaperS3 540x960 竖屏优化）=====
 void App::handleTabReading() {
     static bool needsRender = true;
     if (!needsRender && !_tabNeedsRender[0]) return;
-    
+
     auto& display = M5.Display;
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
-    display.clear();
-    
-    // 背景
-    display.fillScreen(BG_LIGHT);
-    
-    // 顶部标签
+    prepareShellFrame();
     renderTopTabs();
-    
-    int16_t cy = contentTop();
-    
-    // 阅读统计卡片（顶部横条）
-    UITheme::drawCard(10, cy, SCREEN_WIDTH - 20, 80, BG_WHITE, BORDER_LIGHT);
-    display.setTextSize(1);
-    display.setTextColor(TEXT_MID, BG_WHITE);
-    display.setCursor(30, cy + 12);
-    display.printf("今日阅读 %s", _stats.formatTime(_stats.getTodaySeconds()).c_str());
-    display.setCursor(30, cy + 35);
-    display.printf("累计 %s | %d 页", 
-        _stats.formatTime(_stats.getTotalReadingSeconds()).c_str(),
-        _stats.getTotalPagesRead());
-    display.setCursor(30, cy + 58);
-    display.printf("总书籍 %d 本", _recent.getCount());
-    display.setTextColor(TEXT_BLACK, BG_LIGHT);
-    
-    cy += 90;
-    
-    // 最近阅读标题
-    UITheme::drawSectionTitle(20, cy, "继续阅读");
-    cy += 35;
-    
-    // 最近1本（大图）
+
+    const int16_t x = contentLeft();
+    const int16_t w = contentWidth();
+    int16_t y = contentTop();
+
+    UITheme::drawSectionTitle(x, y, "继续阅读");
+    y += 42;
+
     int recentCount = _recent.getCount();
     if (recentCount > 0) {
         const RecentBook* book = _recent.getBook(0);
-        if (book) {
-            int pct = _recent.getProgressPercent(0);
-            UITheme::drawBookCover(40, cy, 280, 180, book->name, "最近阅读", pct);
-            // 进度和页码
-            display.setTextSize(1);
-            display.setTextColor(TEXT_MID, BG_LIGHT);
-            display.setCursor(40, cy + 188);
-            display.printf("进度 %d%% | 点击继续", pct);
-            display.setTextColor(TEXT_BLACK, BG_LIGHT);
-        }
-    } else {
-        // 空状态
-        UITheme::drawCard(40, cy, 280, 180, BG_MID, BORDER);
+        int pct = _recent.getProgressPercent(0);
+        UITheme::drawCard(x, y, w, 218, BG_WHITE, BORDER);
+        display.setTextSize(2);
+        display.setTextColor(TEXT_BLACK, BG_WHITE);
+        display.setCursor(x + 18, y + 22);
+        display.print(book ? book->name : "最近阅读");
         display.setTextSize(1);
-        display.setTextColor(TEXT_MID, BG_MID);
-        UITheme::drawTextCentered(40, cy, 280, 180, "暂无阅读记录", 1, TEXT_MID);
+        display.setCursor(x + 18, y + 76);
+        display.printf("阅读进度：%d%%", pct);
+        display.setCursor(x + 18, y + 108);
+        display.print("点击继续阅读");
+        display.drawRect(x + 18, y + 154, w - 36, 18, TEXT_BLACK);
+        display.fillRect(x + 20, y + 156, max(1, (w - 40) * pct / 100), 14, TEXT_BLACK);
         display.setTextColor(TEXT_BLACK, BG_LIGHT);
+    } else {
+        UITheme::drawCard(x, y, w, 218, BG_WHITE, BORDER);
+        UITheme::drawTextCentered(x, y + 46, w, 80, "暂无阅读记录", 2, TEXT_MID);
+        UITheme::drawTextCentered(x, y + 124, w, 40, "到“书架”选择一本书开始阅读", 1, TEXT_MID);
     }
-    
-    cy += 220;
-    
-    // 其他书籍（小封面，横向排列）
+    y += 252;
+
+    UITheme::drawSectionTitle(x, y, "阅读统计");
+    y += 42;
+    UITheme::drawCard(x, y, w, 122, BG_WHITE, BORDER_LIGHT);
+    display.setTextSize(1);
+    display.setTextColor(TEXT_BLACK, BG_WHITE);
+    display.setCursor(x + 18, y + 18);
+    display.printf("今日阅读：%s", _stats.formatTime(_stats.getTodaySeconds()).c_str());
+    display.setCursor(x + 18, y + 50);
+    display.printf("累计阅读：%s", _stats.formatTime(_stats.getTotalReadingSeconds()).c_str());
+    display.setCursor(x + 18, y + 82);
+    display.printf("累计翻页：%d 页", _stats.getTotalPagesRead());
+    display.setTextColor(TEXT_BLACK, BG_LIGHT);
+    y += 154;
+
     if (recentCount > 1) {
-        UITheme::drawSectionTitle(20, cy, "更多书籍");
-        cy += 30;
-        
-        int smallW = 160;
-        int smallH = 110;
-        int gap = 15;
-        int maxShow = min(3, recentCount - 1);
-        int startX = (SCREEN_WIDTH - (maxShow * smallW + (maxShow - 1) * gap)) / 2;
-        
+        UITheme::drawSectionTitle(x, y, "最近书籍");
+        y += 42;
+        const int cardH = 78;
+        int maxShow = min(4, recentCount - 1);
         for (int i = 0; i < maxShow; i++) {
             const RecentBook* book = _recent.getBook(i + 1);
-            if (book) {
-                int pct = _recent.getProgressPercent(i + 1);
-                int bx = startX + i * (smallW + gap);
-                UITheme::drawBookCover(bx, cy, smallW, smallH, book->name, nullptr, pct);
-            }
+            int iy = y + i * (cardH + 10);
+            UITheme::drawCard(x, iy, w, cardH, BG_WHITE, BORDER_LIGHT);
+            display.setTextSize(1);
+            display.setTextColor(TEXT_BLACK, BG_WHITE);
+            display.setCursor(x + 16, iy + 14);
+            display.print(book ? book->name : "书籍");
+            display.setTextColor(TEXT_MID, BG_WHITE);
+            display.setCursor(x + 16, iy + 44);
+            display.printf("进度 %d%%", _recent.getProgressPercent(i + 1));
         }
     }
-    
-    // 底部导航
-    renderBottomNav();
-    
-    display.display();
+
+    commitShellFrame();
     needsRender = false;
     _tabNeedsRender[0] = false;
 }
 
-// ===== 📚 书架（9宫格封面）=====
+// ===== 📚 书架（2列 x 4行，适配 540 竖屏）=====
 void App::handleTabLibrary() {
     static bool needsRender = true;
     if (!needsRender && !_tabNeedsRender[1]) return;
-    
+
     auto& display = M5.Display;
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
-    display.clear();
-    display.fillScreen(BG_LIGHT);
-    
+    prepareShellFrame();
     renderTopTabs();
-    
-    int16_t cy = contentTop();
-    
-    // 计算分页
-    int totalBooks = _browser.getItemCount();
-    int booksPerPage = 9; // 3x3
+
+    const int totalBooks = _browser.getItemCount();
+    const int booksPerPage = 8;
     _libraryTotalPages = (totalBooks + booksPerPage - 1) / booksPerPage;
     if (_libraryTotalPages < 1) _libraryTotalPages = 1;
     if (_libraryPage >= _libraryTotalPages) _libraryPage = _libraryTotalPages - 1;
-    
-    // 标题 + 页码
+
+    int16_t x = contentLeft();
+    int16_t y = contentTop();
+    UITheme::drawSectionTitle(x, y, "书架");
     display.setTextSize(1);
     display.setTextColor(TEXT_MID, BG_LIGHT);
-    display.setCursor(SCREEN_WIDTH - 120, cy + 5);
-    display.printf("%d / %d", _libraryPage + 1, _libraryTotalPages);
-    display.setTextColor(TEXT_BLACK, BG_LIGHT);
-    
-    cy += 25;
-    
-    // 9宫格
-    int cols = 3;
-    int rows = 3;
-    int coverW = 200;
-    int coverH = 130;
-    int gapX = (contentWidth() - cols * coverW) / (cols + 1);
-    int gapY = 15;
-    int startX = contentLeft() + gapX;
-    
+    display.setCursor(SCREEN_WIDTH - 96, y + 8);
+    display.printf("第 %d/%d 页", _libraryPage + 1, _libraryTotalPages);
+    y += 42;
+
+    const int cols = 2;
+    const int cardW = (contentWidth() - 14) / 2;
+    const int cardH = 156;
+    const int gapX = 14;
+    const int gapY = 16;
     int startIdx = _libraryPage * booksPerPage;
+
     for (int i = 0; i < booksPerPage; i++) {
         int idx = startIdx + i;
         if (idx >= totalBooks) break;
-        
         const FileItem* item = _browser.getItem(idx);
         if (!item) continue;
-        
+
         int col = i % cols;
         int row = i / cols;
-        int x = startX + col * (coverW + gapX);
-        int y = cy + row * (coverH + gapY);
-        
-        bool selected = (idx == _librarySelected);
-        if (selected) {
-            // 选中高亮边框
-            display.drawRect(x - 3, y - 3, coverW + 6, coverH + 6, ACCENT);
-        }
-        
-        UITheme::drawBookCover(x, y, coverW, coverH, item->name, 
-            item->isDirectory ? "📁" : nullptr, 0);
+        int bx = x + col * (cardW + gapX);
+        int by = y + row * (cardH + gapY);
+        UITheme::drawCard(bx, by, cardW, cardH, BG_WHITE, idx == _librarySelected ? ACCENT : BORDER_LIGHT);
+
+        display.setTextSize(2);
+        display.setTextColor(TEXT_BLACK, BG_WHITE);
+        display.setCursor(bx + 14, by + 18);
+        display.print(item->isDirectory ? "文件夹" : "书籍");
+        display.setTextSize(1);
+        display.setCursor(bx + 14, by + 66);
+        String name = item->name;
+        if (name.length() > 18) name = name.substring(0, 16) + "..";
+        display.print(name);
+        display.setTextColor(TEXT_MID, BG_WHITE);
+        display.setCursor(bx + 14, by + 108);
+        display.print(item->isDirectory ? "点击打开" : "点击阅读");
+        display.setTextColor(TEXT_BLACK, BG_LIGHT);
     }
-    
-    // 空书架提示
+
     if (totalBooks == 0) {
-        UITheme::drawTextCentered(0, cy + 150, SCREEN_WIDTH, 100, 
-            "书架为空，请放入书籍", 2, TEXT_MID);
+        UITheme::drawTextCentered(0, y + 180, SCREEN_WIDTH, 100, "书架为空", 2, TEXT_MID);
+        UITheme::drawTextCentered(0, y + 255, SCREEN_WIDTH, 50, "请将 TXT 放入 /books", 1, TEXT_MID);
     }
-    
-    renderBottomNav();
-    display.display();
+
+    commitShellFrame();
     needsRender = false;
     _tabNeedsRender[1] = false;
 }
@@ -2117,146 +2267,124 @@ void App::handleTabLibrary() {
 void App::handleTabTransfer() {
     static bool needsRender = true;
     if (!needsRender && !_tabNeedsRender[2]) return;
-    
+
     auto& display = M5.Display;
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
-    display.clear();
-    display.fillScreen(BG_LIGHT);
-    
+    prepareShellFrame();
     renderTopTabs();
-    
-    int16_t cy = contentTop();
-    
-    UITheme::drawSectionTitle(20, cy, "传输中心");
-    cy += 40;
-    
-    // 6 大功能卡片（2列3行）
-    struct TransferItem {
-        const char* icon;
-        const char* title;
-        const char* desc;
-        bool enabled;
-    };
-    
+
+    int16_t x = contentLeft();
+    int16_t y = contentTop();
+    UITheme::drawSectionTitle(x, y, "传输与工具");
+    y += 44;
+
+    struct TransferItem { const char* group; const char* title; const char* desc; bool enabled; };
     TransferItem items[] = {
-        {"🌐", "WiFi传书", _uploader.isRunning() ? "运行中" : "未启动", _uploader.isRunning()},
-        {"📡", "蓝牙翻页", _ble.isRunning() ? "已开启" : "未开启", _ble.isRunning()},
-        {"☁️", "Legado同步", _legadoConfigured ? "已配置" : "未配置", _legadoConfigured},
-        {"📤", "WiFi配置", _wifiConfigured ? _wifiSsid : "未配置", _wifiConfigured},
-        {"📊", "阅读统计", "查看详情", true},
-        {"📁", "文件浏览", "浏览SD卡", true},
+        {"传书", "WiFi传书", _uploader.isRunning() ? "已开启，可用浏览器上传" : "未开启，点击启动传书服务", _uploader.isRunning()},
+        {"传书", "WiFi配置", _wifiConfigured ? _wifiSsid : "未配置，点击查看配置方法", _wifiConfigured},
+        {"同步", "Legado同步", _legadoConfigured ? _legadoHost : "未配置，点击查看配置方法", _legadoConfigured},
+        {"外设", "蓝牙翻页", _ble.isRunning() ? "已开启" : "未开启", _ble.isRunning()},
+        {"工具", "阅读统计", "查看当前书籍和累计统计", true},
+        {"工具", "打开书架", "浏览SD卡中的书籍", true},
     };
-    int numItems = 6;
-    
-    int cardW = (contentWidth() - 15) / 2;
-    int cardH = 110;
-    int gap = 15;
-    
-    for (int i = 0; i < numItems; i++) {
-        int col = i % 2;
-        int row = i / 2;
-        int x = contentLeft() + col * (cardW + gap);
-        int y = cy + row * (cardH + gap);
-        
-        UITheme::drawCard(x, y, cardW, cardH, BG_WHITE, BORDER_LIGHT);
-        
+
+    const int itemH = 84;
+    const int gap = 10;
+    const char* lastGroup = "";
+    for (int i = 0; i < 6; i++) {
+        if (strcmp(lastGroup, items[i].group) != 0) {
+            display.setTextSize(1);
+            display.setTextColor(TEXT_MID, BG_LIGHT);
+            display.setCursor(x, y + 4);
+            display.print(items[i].group);
+            y += 26;
+            lastGroup = items[i].group;
+        }
+        UITheme::drawCard(x, y, contentWidth(), itemH, BG_WHITE, BORDER_LIGHT);
         display.setTextSize(2);
         display.setTextColor(TEXT_BLACK, BG_WHITE);
-        display.setCursor(x + 15, y + 15);
-        display.print(items[i].icon);
-        
-        display.setTextSize(1);
-        display.setCursor(x + 50, y + 18);
+        display.setCursor(x + 18, y + 12);
         display.print(items[i].title);
-        
+        display.setTextSize(1);
         display.setTextColor(TEXT_MID, BG_WHITE);
-        display.setCursor(x + 15, y + 55);
+        display.setCursor(x + 18, y + 50);
         display.print(items[i].desc);
-        
-        // 开关指示
-        int swX = x + cardW - 55;
-        int swY = y + 15;
-        UITheme::drawCapsuleSwitch(swX, swY, 45, items[i].enabled);
-        
-        display.setTextColor(TEXT_BLACK, BG_LIGHT);
+        UITheme::drawCapsuleSwitch(contentRight() - 78, y + 26, 58, items[i].enabled);
+        y += itemH + gap;
     }
-    
-    renderBottomNav();
-    display.display();
+
+    commitShellFrame();
     needsRender = false;
     _tabNeedsRender[2] = false;
 }
 
-// ===== ⚙️ 设置页（卡片式布局）=====
+// ===== ⚙️ 设置页（大字号列表）=====
 void App::handleTabSettings() {
     static bool needsRender = true;
     if (!needsRender && !_tabNeedsRender[3]) return;
-    
+
     auto& display = M5.Display;
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
-    display.clear();
-    display.fillScreen(BG_LIGHT);
-    
+    prepareShellFrame();
     renderTopTabs();
-    
-    int16_t cy = contentTop();
-    
-    UITheme::drawSectionTitle(20, cy, "设置");
-    cy += 40;
-    
-    // 设置项卡片
-    struct SettingItem {
-        const char* icon;
-        const char* title;
-        const char* value;
-        AppState nextState;
-    };
-    
+
+    int16_t x = contentLeft();
+    int16_t y = contentTop();
+    UITheme::drawSectionTitle(x, y, "设置");
+    y += 44;
+
+    struct SettingItem { const char* group; const char* title; const char* value; AppState nextState; };
     RefreshStrategy rs = _reader.getRefreshStrategy();
-    LayoutConfig layout = _reader.getLayoutConfig();
-    
     SettingItem items[] = {
-        {"📝", "排版设置", "字号/边距/间距", AppState::SETTINGS_LAYOUT},
-        {"🔄", "残影控制", rs.getLabel(), AppState::SETTINGS_REFRESH},
-        {"🔤", "字体切换", _fontNames[0], AppState::SETTINGS_FONT},
-        {"📶", "WiFi配置", _wifiConfigured ? _wifiSsid : "未配置", AppState::SETTINGS_WIFI},
-        {"☁️", "Legado同步", _legadoConfigured ? _legadoHost : "未配置", AppState::SETTINGS_LEGADO},
-        {"🔋", "休眠时长", String(String(_sleepTimeoutMin) + "分钟").c_str(), AppState::TAB_SETTINGS},
-        {"ℹ️", "关于", "Vink-PaperS3", AppState::TAB_SETTINGS},
+        {"阅读显示", "排版设置", "字号 / 边距 / 行距", AppState::SETTINGS_LAYOUT},
+        {"阅读显示", "刷新策略", rs.getLabel(), AppState::SETTINGS_REFRESH},
+        {"阅读显示", "字体切换", _fontNames[0], AppState::SETTINGS_FONT},
+        {"连接同步", "WiFi配置", _wifiConfigured ? _wifiSsid : "未配置", AppState::SETTINGS_WIFI},
+        {"连接同步", "Legado同步", _legadoConfigured ? _legadoHost : "未配置", AppState::SETTINGS_LEGADO},
+        {"系统", "休眠时间", String(String(_sleepTimeoutMin) + " 分钟").c_str(), AppState::TAB_SETTINGS},
+        {"系统", "关于", "Vink-PaperS3 v1.2.8", AppState::TAB_SETTINGS},
     };
-    int numItems = 7;
-    
-    int itemH = 55;
-    int gap = 8;
-    int scrollMax = max(0, (numItems * (itemH + gap)) - contentHeight() + 20);
+
+    const int numItems = 7;
+    const int itemH = 76;
+    const int gap = 10;
+    int scrollMax = max(0, (numItems * (itemH + gap) + 90) - contentHeight() + 20);
     if (_settingsScroll > scrollMax) _settingsScroll = scrollMax;
     if (_settingsScroll < 0) _settingsScroll = 0;
-    
+
+    const char* lastGroup = "";
+    int drawY = y - _settingsScroll;
     for (int i = 0; i < numItems; i++) {
-        int y = cy + i * (itemH + gap) - _settingsScroll;
-        if (y + itemH < contentTop() || y > contentBottom()) continue;
-        
-        UITheme::drawCard(contentLeft(), y, contentWidth(), itemH, BG_WHITE, BORDER_LIGHT);
-        
-        display.setTextSize(1);
-        display.setTextColor(TEXT_BLACK, BG_WHITE);
-        display.setCursor(contentLeft() + 15, y + 10);
-        display.print(items[i].icon);
-        display.setCursor(contentLeft() + 45, y + 12);
-        display.print(items[i].title);
-        
-        display.setTextColor(TEXT_MID, BG_WHITE);
-        UITheme::drawTextRight(contentLeft() + 45, y + 32, contentWidth() - 60, items[i].value, 1, TEXT_MID);
-        
-        // 箭头
-        display.setTextColor(TEXT_LIGHT, BG_WHITE);
-        display.setCursor(contentRight() - 20, y + 20);
-        display.print(">");
-        display.setTextColor(TEXT_BLACK, BG_LIGHT);
+        if (strcmp(lastGroup, items[i].group) != 0) {
+            if (drawY >= contentTop() - 24 && drawY <= contentBottom()) {
+                display.setTextSize(1);
+                display.setTextColor(TEXT_MID, BG_LIGHT);
+                display.setCursor(x, drawY + 4);
+                display.print(items[i].group);
+            }
+            drawY += 26;
+            lastGroup = items[i].group;
+        }
+        if (drawY + itemH >= contentTop() && drawY <= contentBottom()) {
+            UITheme::drawCard(x, drawY, contentWidth(), itemH, BG_WHITE, BORDER_LIGHT);
+            display.setTextSize(2);
+            display.setTextColor(TEXT_BLACK, BG_WHITE);
+            display.setCursor(x + 18, drawY + 10);
+            display.print(items[i].title);
+            display.setTextSize(1);
+            display.setTextColor(TEXT_MID, BG_WHITE);
+            display.setCursor(x + 18, drawY + 48);
+            display.print(items[i].value);
+            display.setTextSize(2);
+            display.setTextColor(TEXT_BLACK, BG_WHITE);
+            display.setCursor(contentRight() - 36, drawY + 22);
+            display.print(">");
+            display.setTextColor(TEXT_BLACK, BG_LIGHT);
+        }
+        drawY += itemH + gap;
     }
-    
-    renderBottomNav();
-    display.display();
+
+    commitShellFrame();
     needsRender = false;
     _tabNeedsRender[3] = false;
 }
@@ -2313,137 +2441,91 @@ void App::handleReaderMenu() {
 // ===== 排版设置（卡片式 + 滑块）=====
 void App::handleSettingsLayout() {
     auto& display = M5.Display;
-    display.clear();
-    display.fillScreen(BG_LIGHT);
-    
-    UITheme::drawSectionTitle(20, 15, "排版设置");
-    
+    prepareShellFrame();
+    drawBackHeader("排版设置", "点 < / 右滑 / 上滑返回");
+
     LayoutConfig layout = _reader.getLayoutConfig();
-    
-    int cy = 55;
-    int itemH = 70;
-    
-    // 字号
-    UITheme::drawCard(10, cy, SCREEN_WIDTH - 20, itemH, BG_WHITE, BORDER_LIGHT);
-    display.setTextSize(1);
-    display.setTextColor(TEXT_BLACK, BG_WHITE);
-    display.setCursor(25, cy + 8);
-    display.print("字号");
-    UITheme::drawSlider(25, cy + 32, SCREEN_WIDTH - 150, 12, 48, layout.fontSize, "px");
-    cy += itemH + 10;
-    
-    // 行间距
-    UITheme::drawCard(10, cy, SCREEN_WIDTH - 20, itemH, BG_WHITE, BORDER_LIGHT);
-    display.setCursor(25, cy + 8);
-    display.print("行间距");
-    UITheme::drawSlider(25, cy + 32, SCREEN_WIDTH - 150, 50, 200, layout.lineSpacing, "%");
-    cy += itemH + 10;
-    
-    // 页边距
-    UITheme::drawCard(10, cy, SCREEN_WIDTH - 20, itemH, BG_WHITE, BORDER_LIGHT);
-    display.setCursor(25, cy + 8);
-    display.print("左右边距");
-    UITheme::drawSlider(25, cy + 32, SCREEN_WIDTH - 150, 0, 120, layout.marginLeft, "px");
-    cy += itemH + 10;
-    
-    // 首行缩进
-    UITheme::drawCard(10, cy, SCREEN_WIDTH - 20, itemH, BG_WHITE, BORDER_LIGHT);
-    display.setCursor(25, cy + 8);
-    display.print("首行缩进");
-    UITheme::drawSlider(25, cy + 32, SCREEN_WIDTH - 150, 0, 4, layout.indentFirstLine, "字");
-    
-    UITheme::drawTextCentered(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 30, 
-        "← → 调整 | 点击确认 | 上滑返回", 1, TEXT_MID);
-    
-    display.display();
+    struct Row { const char* name; int minVal; int maxVal; int value; const char* unit; };
+    Row rows[] = {
+        {"字号", 12, 48, layout.fontSize, "px"},
+        {"行距", 50, 200, layout.lineSpacing, "%"},
+        {"左右边距", 0, 120, layout.marginLeft, "px"},
+        {"顶部边距", 0, 100, layout.marginTop, "px"},
+        {"首行缩进", 0, 4, layout.indentFirstLine, "字"},
+    };
+
+    int y = 108;
+    for (int i = 0; i < 5; i++) {
+        UITheme::drawCard(contentLeft(), y, contentWidth(), 112, BG_WHITE, i == _layoutEditorIndex ? ACCENT : BORDER_LIGHT);
+        display.setTextSize(2);
+        display.setTextColor(TEXT_BLACK, BG_WHITE);
+        display.setCursor(contentLeft() + 18, y + 14);
+        if (i == _layoutEditorIndex) display.print("* ");
+        display.print(rows[i].name);
+        UITheme::drawSlider(contentLeft() + 18, y + 64, contentWidth() - 130, rows[i].minVal, rows[i].maxVal, rows[i].value, rows[i].unit);
+        y += 126;
+    }
+    UITheme::drawTextCentered(0, SCREEN_HEIGHT - 54, SCREEN_WIDTH, 34, "点击切换项目，左右滑动调整", 1, TEXT_MID);
+    commitShellFrame();
 }
 
 // ===== 残影控制（胶囊开关式）=====
 void App::handleSettingsRefresh() {
     auto& display = M5.Display;
-    display.clear();
-    display.fillScreen(BG_LIGHT);
-    
-    UITheme::drawSectionTitle(20, 15, "残影控制");
-    
+    prepareShellFrame();
+    drawBackHeader("刷新策略", "点击档位切换，点 < 返回");
+
     RefreshStrategy strategy = _reader.getRefreshStrategy();
-    
-    const char* labels[] = {"低(流畅)", "中(平衡)", "高(清晰)"};
+    const char* labels[] = {"极速", "均衡", "清晰"};
     const char* descs[] = {
-        "每10页全刷，翻页最快，残影较多",
-        "每5页全刷，平衡速度与清晰度",
-        "每3页全刷，最清晰，略慢"
+        "局部快刷为主，每20页全刷一次",
+        "局部快刷为主，每10页全刷一次",
+        "文字更清晰，每5页全刷一次"
     };
     int selected = (int)strategy.frequency;
-    
-    int cy = 60;
+
+    int y = 116;
     for (int i = 0; i < 3; i++) {
-        UITheme::drawCard(10, cy, SCREEN_WIDTH - 20, 90, BG_WHITE, BORDER_LIGHT);
-        
-        display.setTextSize(1);
+        UITheme::drawCard(contentLeft(), y, contentWidth(), 128, BG_WHITE, i == selected ? ACCENT : BORDER_LIGHT);
+        display.setTextSize(2);
         display.setTextColor(TEXT_BLACK, BG_WHITE);
-        display.setCursor(25, cy + 10);
+        display.setCursor(contentLeft() + 18, y + 18);
         display.print(labels[i]);
-        
+        display.setTextSize(1);
         display.setTextColor(TEXT_MID, BG_WHITE);
-        display.setCursor(25, cy + 35);
+        display.setCursor(contentLeft() + 18, y + 64);
         display.print(descs[i]);
-        
-        // 胶囊开关
-        int swX = SCREEN_WIDTH - 80;
-        int swY = cy + 30;
-        UITheme::drawCapsuleSwitch(swX, swY, 55, i == selected);
-        
-        cy += 105;
+        UITheme::drawCapsuleSwitch(contentRight() - 78, y + 44, 58, i == selected);
+        y += 148;
     }
-    
-    UITheme::drawTextCentered(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 30, 
-        "点击切换 | 上滑返回", 1, TEXT_MID);
-    
-    display.display();
+    commitShellFrame();
 }
 
 // ===== 字体切换（列表式）=====
 void App::handleSettingsFont() {
     auto& display = M5.Display;
-    display.clear();
-    display.fillScreen(BG_LIGHT);
-    
-    UITheme::drawSectionTitle(20, 15, "字体切换");
-    
+    prepareShellFrame();
+    drawBackHeader("字体切换", "点击字体切换，点 < 返回");
+
     if (_fontCount <= 0) {
-        UITheme::drawTextCentered(0, 200, SCREEN_WIDTH, 100, 
-            "未找到字体文件", 2, TEXT_MID);
-        UITheme::drawTextCentered(0, 280, SCREEN_WIDTH, 50, 
-            "请放入 /fonts/*.fnt", 1, TEXT_MID);
-        display.display();
+        UITheme::drawTextCentered(0, 260, SCREEN_WIDTH, 80, "未找到字体", 2, TEXT_MID);
+        UITheme::drawTextCentered(0, 330, SCREEN_WIDTH, 50, "请将 .fnt 放入 /fonts", 1, TEXT_MID);
+        commitShellFrame();
         return;
     }
-    
-    int itemH = 50;
-    int cy = 60;
-    for (int i = 0; i < _fontCount; i++) {
-        int y = cy + i * (itemH + 5);
-        UITheme::drawCard(10, y, SCREEN_WIDTH - 20, itemH, BG_WHITE, BORDER_LIGHT);
-        
+
+    int y = 112;
+    for (int i = 0; i < _fontCount && i < 9; i++) {
         bool isCurrent = (strcmp(_font.getCurrentFontPath(), _fontPaths[i]) == 0);
-        display.setTextSize(1);
-        if (isCurrent) {
-            display.setTextColor(ACCENT, BG_WHITE);
-            display.setCursor(25, y + 18);
-            display.print("✓ ");
-        } else {
-            display.setTextColor(TEXT_BLACK, BG_WHITE);
-            display.setCursor(25, y + 18);
-        }
+        UITheme::drawCard(contentLeft(), y, contentWidth(), 78, BG_WHITE, isCurrent ? ACCENT : BORDER_LIGHT);
+        display.setTextSize(2);
+        display.setTextColor(TEXT_BLACK, BG_WHITE);
+        display.setCursor(contentLeft() + 18, y + 22);
+        if (isCurrent) display.print("* ");
         display.print(_fontNames[i]);
-        display.setTextColor(TEXT_BLACK, BG_LIGHT);
+        y += 92;
     }
-    
-    UITheme::drawTextCentered(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 30, 
-        "点击切换 | 上滑返回", 1, TEXT_MID);
-    
-    display.display();
+    commitShellFrame();
 }
 
 // ===== WiFi配置 =====

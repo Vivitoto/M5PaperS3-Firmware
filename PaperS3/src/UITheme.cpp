@@ -27,25 +27,21 @@ void UITheme::drawTabBookmark(int16_t x, int16_t y, int16_t w, int16_t h, bool a
     auto& display = M5.Display;
     
     if (active) {
-        // 激活态：深色背景，白色文字，书签底部形状
-        fillRoundRect(x, y + 8, w, h - 8, 6, ACCENT);
-        // 书签底部尖角
-        display.fillTriangle(x + w/2 - 6, y + h, x + w/2, y + h + 6, x + w/2 + 6, y + h, ACCENT);
+        // 激活态：黑底白字，顶部区域足够高，适合手指点击。
+        fillRoundRect(x + 5, y + 8, w - 10, h - 16, 8, ACCENT);
         display.setTextColor(BG_WHITE, ACCENT);
     } else {
-        // 非激活态：透明背景，灰色文字
+        display.drawRoundRect(x + 5, y + 8, w - 10, h - 16, 8, BORDER_LIGHT);
         display.setTextColor(TEXT_MID, BG_LIGHT);
     }
     
-    display.setTextSize(1);
-    // 图标
+    display.setTextSize(2);
     if (icon) {
-        display.setCursor(x + (w - 16) / 2, y + 14);
+        display.setCursor(x + 16, y + 26);
         display.print(icon);
     }
-    // 标签
-    int16_t tw = textWidth(label, 1);
-    display.setCursor(x + (w - tw) / 2, y + 28);
+    int16_t tw = textWidth(label, 2);
+    display.setCursor(x + (w - tw) / 2, y + 27);
     display.print(label);
     
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
@@ -66,11 +62,11 @@ void UITheme::drawCapsuleSwitch(int16_t x, int16_t y, int16_t w, bool on) {
     if (on) {
         display.setTextColor(BG_WHITE, ACCENT);
         display.setCursor(x + 8, y + 8);
-        display.print("ON");
+        display.print("开");
     } else {
         display.setTextColor(TEXT_LIGHT, BG_MID);
         display.setCursor(x + w - 24, y + 8);
-        display.print("OFF");
+        display.print("关");
     }
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
 }
@@ -180,9 +176,9 @@ void UITheme::drawSectionTitle(int16_t x, int16_t y, const char* title) {
     display.setCursor(x, y);
     display.print(title);
     
-    // 底部装饰线
     int16_t tw = textWidth(title, 2);
-    display.drawLine(x, y + 22, x + tw, y + 22, ACCENT);
+    display.drawLine(x, y + 24, x + tw, y + 24, ACCENT);
+    display.drawLine(x, y + 25, x + tw, y + 25, ACCENT);
 }
 
 void UITheme::drawSeparator(int16_t x, int16_t y, int16_t w) {
@@ -202,7 +198,22 @@ void UITheme::drawIconButton(int16_t x, int16_t y, int16_t size, const char* ico
 
 int16_t UITheme::textWidth(const char* text, uint8_t textSize) {
     if (!text) return 0;
-    return strlen(text) * 6 * textSize;
+    int16_t units = 0;
+    const uint8_t* p = reinterpret_cast<const uint8_t*>(text);
+    while (*p) {
+        if ((*p & 0x80) == 0) {
+            units += 1;
+            p += 1;
+        } else {
+            // UTF-8 Chinese glyph: estimate as two ASCII cells and skip sequence.
+            units += 2;
+            if ((*p & 0xE0) == 0xC0) p += 2;
+            else if ((*p & 0xF0) == 0xE0) p += 3;
+            else if ((*p & 0xF8) == 0xF0) p += 4;
+            else p += 1;
+        }
+    }
+    return units * 6 * textSize;
 }
 
 void UITheme::drawTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const char* text, uint8_t textSize, uint16_t color) {

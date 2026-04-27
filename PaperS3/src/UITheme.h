@@ -32,18 +32,18 @@ namespace UITheme {
     constexpr uint16_t BORDER_LIGHT = TFT_BLACK;
     
     // 尺寸常量
-    constexpr int16_t TOP_TAB_H    = 50;   // 顶部标签高度
+    constexpr int16_t TOP_TAB_H    = 72;   // 顶部标签高度，适配 540x960 竖屏触摸
     constexpr int16_t BOTTOM_NAV_H = 0;    // M5PaperS3 无物理按键，无底部导航栏
-    constexpr int16_t CARD_RADIUS  = 6;    // 卡片圆角
-    constexpr int16_t ITEM_H       = 44;   // 列表项高度
+    constexpr int16_t CARD_RADIUS  = 10;   // 卡片圆角
+    constexpr int16_t ITEM_H       = 76;   // 列表项高度
     
     // 安全区域（减去顶部标签和底部导航）
-    inline int16_t contentTop()    { return TOP_TAB_H + 5; }
-    inline int16_t contentBottom() { return SCREEN_HEIGHT - BOTTOM_NAV_H - 5; }
+    inline int16_t contentTop()    { return TOP_TAB_H + 16; }
+    inline int16_t contentBottom() { return SCREEN_HEIGHT - BOTTOM_NAV_H - 18; }
     inline int16_t contentHeight() { return contentBottom() - contentTop(); }
-    inline int16_t contentWidth()  { return SCREEN_WIDTH - 20; }
-    inline int16_t contentLeft()   { return 10; }
-    inline int16_t contentRight()  { return SCREEN_WIDTH - 10; }
+    inline int16_t contentWidth()  { return SCREEN_WIDTH - 40; }
+    inline int16_t contentLeft()   { return 20; }
+    inline int16_t contentRight()  { return SCREEN_WIDTH - 20; }
     
     // 绘制工具函数
     void drawRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint16_t color);

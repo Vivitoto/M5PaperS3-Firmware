@@ -36,6 +36,8 @@ private:
     unsigned long _lastActivityTime;
     bool _sleepPending;
     bool _powerButtonArmed;
+    bool _shutdownInProgress;
+    unsigned long _powerButtonPressStart;
     
     // 触摸状态
     bool _touching;
@@ -124,6 +126,7 @@ private:
     void renderTopTabs();
     void renderBottomNav();
     void switchTab(int tab);
+    void navigateBack();
     bool isTabState(AppState state);
     
     // 旧函数名兼容

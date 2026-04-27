@@ -78,11 +78,11 @@ struct LayoutConfig {
 
 // ===== 触摸区域 =====
 #define ZONE_LEFT_X     0
-#define ZONE_LEFT_W     240
-#define ZONE_CENTER_X   240
-#define ZONE_CENTER_W   480
-#define ZONE_RIGHT_X    720
-#define ZONE_RIGHT_W    240
+#define ZONE_LEFT_W     180
+#define ZONE_CENTER_X   180
+#define ZONE_CENTER_W   180
+#define ZONE_RIGHT_X    360
+#define ZONE_RIGHT_W    180
 
 // ===== 应用状态 =====
 enum class AppState {

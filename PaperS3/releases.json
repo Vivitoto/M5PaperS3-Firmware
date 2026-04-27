@@ -5,6 +5,32 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v1.2.8",
+      "name": "Vink-PaperS3 v1.2.8 中文界面测试",
+      "summary": "按 PaperS3 540×960 竖屏重新整理中文 UI，补齐功能分类与统一返回逻辑，并保留电源键关机修复。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v1.2.8",
+      "changelog": "## Vink-PaperS3 v1.2.8 中文界面测试\n\n### 中文界面与功能分类\n- 顶部主导航改为中文：阅读 / 书架 / 传输 / 设置。\n- 阅读页整理为继续阅读、阅读统计、最近书籍。\n- 书架页按 PaperS3 540×960 竖屏改为 2 列 × 4 行大卡片，区分文件夹与书籍。\n- 传输页按功能分组：传书、同步、外设、工具。\n- 设置页按功能分组：阅读显示、连接同步、系统。\n\n### 设置子页面\n- 排版设置、刷新策略、字体切换、WiFi 配置、Legado 同步、阅读统计改为中文大卡片界面。\n- WiFi 配置页说明 `/wifi_config.json` 的 SD 卡配置方式。\n- Legado 同步页说明 `/legado_config.json` 的配置状态。\n\n### 统一返回\n- 子页面支持左上角 `<`、右滑、上滑返回上一级。\n- 设置子页面返回设置页；阅读工具返回阅读页；传输工具返回传输页。\n\n### PaperS3 适配\n- 修正触摸分区为 540px 竖屏宽度，避免沿用旧横屏点击区域。\n- Shell UI 使用 `epd_fastest` 快刷路径，降低页面切换全刷观感。\n- 继续保留 v1.2.6 的 PaperS3 GPIO44 PMIC 关机脉冲与电源键接管逻辑。\n\n### 烧录包\n- Vink Flasher 默认使用 `full` 完整 16MB 镜像，从 `0x0` 写入。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v1.2.8-chinese-ui-test-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.8/Vink-PaperS3-v1.2.8-chinese-ui-test-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        },
+        "ota": {
+          "name": "Vink-PaperS3-v1.2.8-chinese-ui-test-ota.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.8/Vink-PaperS3-v1.2.8-chinese-ui-test-ota.bin",
+          "size": 1904224,
+          "flashOffset": 65536
+        },
+        "spiffs": {
+          "name": "Vink-PaperS3-v1.2.8-chinese-ui-test-spiffs.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v1.2.8/Vink-PaperS3-v1.2.8-chinese-ui-test-spiffs.bin",
+          "size": 4128768
+        }
+      }
+    },
+    {
       "version": "v1.2.5",
       "name": "Vink-PaperS3 v1.2.5 High contrast UI test",
       "summary": "修复主界面灰色网纹，改为纯黑白高对比 UI；电源键改为开机后再按一次关机。",
