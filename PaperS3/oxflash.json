@@ -1,0 +1,22 @@
+[
+  {
+    "_id": "vink_papers3",
+    "fid": "vink_papers3",
+    "name": "Vink-PaperS3",
+    "author": "ifocuspace",
+    "category": "paper",
+    "description": "Vink-PaperS3 full image for M5Stack PaperS3. Added for 0xFlash compatibility testing.",
+    "cover": "",
+    "device": "paper_s3",
+    "versions": [
+      {
+        "version": "v1.2.0 full 16MB",
+        "file": "v1.2.0/Vink-PaperS3-v1.2.0-full-16MB.bin",
+        "published_at": "2026-04-26T02:46:32Z",
+        "is_stable": true,
+        "size": 16777216,
+        "change_log": "Vink-PaperS3 v1.2.0 full 16MB image. Bootloader + partition table + app + SPIFFS, flash from 0x0."
+      }
+    ]
+  }
+]
