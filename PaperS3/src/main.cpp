@@ -1,15 +1,38 @@
 #include <Arduino.h>
-#include "App.h"
+#include "vink3/runtime/VinkRuntime.h"
 
-App app;
+namespace {
+TaskHandle_t s_mainTask = nullptr;
+
+void MainTask(void*) {
+    if (!vink3::g_runtime.begin()) {
+        Serial.println("[MainTask] Vink v0.3.0 runtime init failed, halting");
+        for (;;) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+
+    for (;;) {
+        vink3::g_runtime.loop();
+    }
+}
+} // namespace
 
 void setup() {
-    if (!app.init()) {
-        Serial.println("[Main] Init failed, halting");
-        while (true) { delay(1000); }
+    // ReadPaper 1.7.6 style: Arduino setup only starts a pinned supervisor task;
+    // the runtime then creates display/input/state service tasks.
+    BaseType_t ok = xTaskCreatePinnedToCore(
+        MainTask,
+        "MainTask",
+        32768,
+        nullptr,
+        4,
+        &s_mainTask,
+        1);
+    if (ok != pdPASS) {
+        Serial.begin(115200);
+        Serial.println("[setup] failed to create MainTask");
     }
 }
 
 void loop() {
-    app.run();
+    vTaskDelay(pdMS_TO_TICKS(1000));
 }

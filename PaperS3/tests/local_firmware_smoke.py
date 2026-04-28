@@ -63,6 +63,10 @@ def assert_not_contains(text: str, needle: str, label: str) -> None:
 
 
 def source_invariants() -> None:
+    main_cpp = read("src/main.cpp")
+    if "vink3/runtime/VinkRuntime.h" in main_cpp:
+        return vink3_source_invariants(main_cpp)
+
     app = read("src/App.cpp")
     app_h = read("src/App.h")
     wifi = read("src/WiFiUploader.cpp")
@@ -102,6 +106,42 @@ def source_invariants() -> None:
         if not any(p in line for p in allowed_patterns):
             fail(f"unexpected display.display use at App.cpp:{line_no}: {line}")
     ok(f"Direct display calls are limited to intended paths ({len(display_lines)} lines)")
+
+
+def vink3_source_invariants(main_cpp: str) -> None:
+    display_h = read("src/vink3/display/DisplayService.h")
+    display_cpp = read("src/vink3/display/DisplayService.cpp")
+    runtime_cpp = read("src/vink3/runtime/VinkRuntime.cpp")
+    input_cpp = read("src/vink3/input/InputService.cpp")
+    state_cpp = read("src/vink3/state/StateMachine.cpp")
+    legado_cpp = read("src/vink3/sync/LegadoService.cpp")
+    upstream = read("src/vink3/ReadPaper176.h")
+
+    assert_contains(main_cpp, "xTaskCreatePinnedToCore", "v0.3 main starts a ReadPaper-style pinned MainTask")
+    assert_contains(runtime_cpp, "kReadPaperUpstreamVersion", "v0.3 runtime records ReadPaper upstream baseline")
+    assert_contains(upstream, "V1.7.6", "v0.3 baseline is ReadPaper V1.7.6")
+    assert_contains(upstream, "e910d29", "v0.3 baseline records latest remote commit")
+    assert_contains(display_h, "DisplayRequest", "v0.3 display queue has ReadPaper-style request struct")
+    assert_contains(display_cpp, "cloneCanvas()", "v0.3 display queue snapshots canvas before physical push")
+    assert_contains(display_cpp, "M5.Display.waitDisplay()", "v0.3 display task serializes physical EPD pushes")
+    assert_contains(display_cpp, "g_inDisplayPush", "v0.3 display task exposes in-push guard")
+    assert_contains(input_cpp, "g_inDisplayPush", "v0.3 input task suppresses events during display push")
+    assert_contains(input_cpp, "M5.update();", "v0.3 input task owns M5.update polling")
+    assert_contains(state_cpp, "xQueueReceive", "v0.3 state machine is queue-driven")
+    assert_contains(legado_cpp, "LegadoService", "v0.3 Legado integration is isolated as a service")
+
+    ui_sources = [
+        "src/vink3/ui/VinkUiRenderer.cpp",
+        "src/vink3/state/StateMachine.cpp",
+        "src/vink3/input/InputService.cpp",
+        "src/vink3/runtime/VinkRuntime.cpp",
+        "src/vink3/sync/LegadoService.cpp",
+    ]
+    for rel in ui_sources:
+        text = read(rel)
+        if "M5.Display.display(" in text or "M5.Display.pushSprite(" in text:
+            fail(f"v0.3 non-display service directly writes physical display: {rel}")
+    ok("v0.3 physical display writes are isolated to DisplayService")
 
 
 def manifest_and_artifacts(slug: str) -> None:

@@ -1,5 +1,6 @@
 #include "StateMachine.h"
 #include "../display/DisplayService.h"
+#include "../ui/VinkUiRenderer.h"
 
 namespace vink3 {
 
@@ -47,12 +48,49 @@ void StateMachine::handle(const Message& message) {
     switch (message.type) {
         case MessageType::BootComplete:
             state_ = SystemState::Home;
-            g_displayService.enqueueFull(true, 100);
+            g_uiRenderer.renderHome(state_);
+            g_displayService.enqueueFull(false, 100);
             break;
+
+        case MessageType::Tap:
+            // Initial v0.3 Vink shell hit zones. This is deliberately simple; the
+            // important part is ReadPaper-style state ownership rather than UI-loop mutation.
+            if (state_ == SystemState::Home) {
+                if (message.touch.y >= 408 && message.touch.y < 520) {
+                    state_ = SystemState::LegadoSync;
+                    g_uiRenderer.renderLegadoSync("Legado sync service ready");
+                } else {
+                    g_uiRenderer.renderHome(state_);
+                }
+                g_displayService.enqueueFull(false, 100);
+            } else {
+                state_ = SystemState::Home;
+                g_uiRenderer.renderHome(state_);
+                g_displayService.enqueueFull(false, 100);
+            }
+            break;
+
         case MessageType::LegadoSyncStart:
             state_ = SystemState::LegadoSync;
+            g_uiRenderer.renderLegadoSync("Syncing reading progress...");
+            g_displayService.enqueueFull(false, 100);
             break;
+
+        case MessageType::LegadoSyncDone:
+            state_ = SystemState::LegadoSync;
+            g_uiRenderer.renderLegadoSync("Sync complete");
+            g_displayService.enqueueFull(false, 100);
+            break;
+
+        case MessageType::LegadoSyncFailed:
+            state_ = SystemState::LegadoSync;
+            g_uiRenderer.renderLegadoSync("Sync failed");
+            g_displayService.enqueueFull(true, 100);
+            break;
+
         case MessageType::DisplayDone:
+        case MessageType::TouchDown:
+        case MessageType::TouchUp:
         case MessageType::None:
         default:
             break;

@@ -1,4 +1,5 @@
 #include "DisplayService.h"
+#include <cstring>
 
 namespace vink3 {
 
@@ -14,7 +15,14 @@ bool DisplayService::begin(M5Canvas* canvas, uint8_t queueLen) {
     if (!queue_) {
         queue_ = xQueueCreate(queueLen, sizeof(DisplayRequest));
         if (!queue_) {
-            Serial.println("[vink3][display] begin failed: queue create failed");
+            Serial.println("[vink3][display] begin failed: display queue create failed");
+            return false;
+        }
+    }
+    if (!canvasQueue_) {
+        canvasQueue_ = xQueueCreate(queueLen, sizeof(M5Canvas*));
+        if (!canvasQueue_) {
+            Serial.println("[vink3][display] begin failed: canvas queue create failed");
             return false;
         }
     }
@@ -33,13 +41,32 @@ bool DisplayService::begin(M5Canvas* canvas, uint8_t queueLen) {
             return false;
         }
     }
-    Serial.println("[vink3][display] service started");
+    M5.Display.powerSaveOff();
+    Serial.printf("[vink3][display] service started from ReadPaper %s model\n", kReadPaperUpstreamVersion);
     return true;
 }
 
 bool DisplayService::enqueue(const DisplayRequest& request, uint32_t timeoutMs) {
     if (!queue_) return false;
-    return xQueueSend(queue_, &request, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
+
+    // Match ReadPaper 1.7.6: render side snapshots the canvas before the display
+    // task performs the physical push. This prevents UI drawing from racing the EPD.
+    M5Canvas* clone = cloneCanvas();
+    if (clone && !enqueueCanvasCloneBlocking(clone)) {
+        delete clone;
+        clone = nullptr;
+    }
+
+    if (xQueueSend(queue_, &request, pdMS_TO_TICKS(timeoutMs)) != pdTRUE) {
+        if (clone) {
+            // Remove the clone we just queued if possible; otherwise the display task
+            // owns it and will delete it when it pops the next request.
+            M5Canvas* discarded = dequeueCanvasClone();
+            if (discarded) delete discarded;
+        }
+        return false;
+    }
+    return true;
 }
 
 bool DisplayService::enqueueFull(bool quality, uint32_t timeoutMs) {
@@ -47,8 +74,8 @@ bool DisplayService::enqueueFull(bool quality, uint32_t timeoutMs) {
     request.quality = quality;
     request.x = 0;
     request.y = 0;
-    request.w = 540;
-    request.h = 960;
+    request.w = kPaperS3Width;
+    request.h = kPaperS3Height;
     return enqueue(request, timeoutMs);
 }
 
@@ -58,16 +85,22 @@ bool DisplayService::waitIdle(uint32_t timeoutMs) const {
         if (millis() - start >= timeoutMs) return false;
         delay(10);
     }
+    M5.Display.waitDisplay();
     return true;
 }
 
 bool DisplayService::isBusy() const {
     const bool queued = queue_ && uxQueueMessagesWaiting(queue_) > 0;
-    return busy_ || queued;
+    const bool canvasQueued = canvasQueue_ && uxQueueMessagesWaiting(canvasQueue_) > 0;
+    return busy_ || queued || canvasQueued;
 }
 
 uint32_t DisplayService::pushCount() const {
     return pushCount_;
+}
+
+void DisplayService::resetPushCount() {
+    pushCount_ = 0;
 }
 
 void DisplayService::taskThunk(void* arg) {
@@ -78,22 +111,89 @@ void DisplayService::taskLoop() {
     DisplayRequest request;
     for (;;) {
         if (xQueueReceive(queue_, &request, portMAX_DELAY) == pdTRUE) {
-            push(request);
+            M5Canvas* canvasToPush = dequeueCanvasClone();
+            push(request, canvasToPush ? canvasToPush : canvas_);
+            if (canvasToPush) delete canvasToPush;
         }
     }
 }
 
-void DisplayService::push(const DisplayRequest& request) {
-    if (!canvas_) return;
+M5Canvas* DisplayService::cloneCanvas() const {
+    if (!canvas_) return nullptr;
+    void* src = canvas_->getBuffer();
+    const size_t len = canvas_->bufferLength();
+    if (!src || len == 0) return nullptr;
+
+    M5Canvas* clone = new M5Canvas(&M5.Display);
+    if (!clone) return nullptr;
+    clone->setPsram(true);
+    clone->setColorDepth(canvas_->getColorDepth());
+    if (!clone->createSprite(canvas_->width(), canvas_->height())) {
+        delete clone;
+        return nullptr;
+    }
+    void* dst = clone->getBuffer();
+    if (!dst || clone->bufferLength() < len) {
+        delete clone;
+        return nullptr;
+    }
+    memcpy(dst, src, len);
+    return clone;
+}
+
+bool DisplayService::enqueueCanvasCloneBlocking(M5Canvas* clone) {
+    if (!canvasQueue_ || !clone) return false;
+    return xQueueSend(canvasQueue_, &clone, portMAX_DELAY) == pdTRUE;
+}
+
+M5Canvas* DisplayService::dequeueCanvasClone() {
+    if (!canvasQueue_) return nullptr;
+    M5Canvas* clone = nullptr;
+    if (xQueueReceive(canvasQueue_, &clone, 0) == pdTRUE) return clone;
+    return nullptr;
+}
+
+epd_mode_t DisplayService::chooseRefreshMode(const DisplayRequest& request) {
+    const bool needMiddleStep = fastRefresh_ &&
+        kDisplayMiddleRefreshThreshold > 0 &&
+        pushCount_ >= kDisplayMiddleRefreshThreshold &&
+        pushCount_ % kDisplayMiddleRefreshThreshold == 0;
+    const bool useQualityMode = request.quality ||
+        (fastRefresh_ && pushCount_ >= kDisplayQualityFastThreshold) ||
+        (!fastRefresh_ && pushCount_ >= kDisplayFullRefreshNormalThreshold);
+
+    if (useQualityMode) {
+        pushCount_ = 0;
+        M5.Display.setColorDepth(kTextColorDepthHigh);
+        return kQualityRefresh;
+    }
+
+    if (needMiddleStep) {
+        M5.Display.setEpdMode(kMiddleRefresh);
+        M5.Display.fillRect(0, 476, kPaperS3Width, 8, TFT_WHITE);
+        M5.Display.waitDisplay();
+    }
+
+    return fastRefresh_ ? kLowRefresh : kNormalRefresh;
+}
+
+void DisplayService::push(const DisplayRequest& request, M5Canvas* canvasToPush) {
+    if (!canvasToPush) return;
 
     busy_ = true;
     g_inDisplayPush = true;
 
     M5.Display.powerSaveOff();
     M5.Display.waitDisplay();
+    M5.Display.setEpdMode(chooseRefreshMode(request));
 
-    M5.Display.setEpdMode(request.quality ? epd_mode_t::epd_quality : epd_mode_t::epd_text);
-    canvas_->pushSprite(&M5.Display, request.x, request.y);
+    const int16_t x = request.x;
+    const int16_t y = request.y;
+    if (request.transparent) {
+        canvasToPush->pushSprite(&M5.Display, x, y, request.invert ? TFT_BLACK : TFT_WHITE);
+    } else {
+        canvasToPush->pushSprite(&M5.Display, x, y);
+    }
     M5.Display.waitDisplay();
 
     pushCount_++;

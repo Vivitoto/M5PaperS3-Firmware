@@ -316,3 +316,37 @@ Even with ReadPaper architecture copied, local tests cannot prove:
 - PSRAM-backed canvas behavior under long rapid interaction on real device.
 
 These require one real burn test per RC.
+
+## 2026-04-28 Update: Remote ReadPaper V1.7.6 Baseline
+
+The rewrite baseline is now the remote upstream, not the older local mirror:
+
+```text
+repo: https://github.com/shinemoon/M5ReadPaper
+branch: main
+commit: e910d29
+version file: data/version => V1.7.6
+```
+
+The local reference checkout is:
+
+```text
+/home/vito/.openclaw/workspace/Vink/reference-firmware/M5ReadPaper-latest
+```
+
+Current v0.3 implementation changes made against that baseline:
+
+- `src/main.cpp` now follows ReadPaper's startup model: Arduino `setup()` creates a pinned `MainTask`, while the runtime owns service startup.
+- `src/vink3/ReadPaper176.h` records the upstream repo/version/commit and carries the PaperS3 display constants/refresh thresholds.
+- `src/vink3/runtime/VinkRuntime.*` performs ReadPaper-style hardware init: `clear_display=false`, PaperS3 fallback board, power/IMU/RTC enabled, GPIO48 wake enabled, global 540x960 4bpp canvas allocated early.
+- `src/vink3/display/DisplayService.*` now mirrors ReadPaper's display-push model more closely: request queue plus canvas-clone FIFO, `g_inDisplayPush`, `powerSaveOff()`, `waitDisplay()` serialization, push counters, and quality/normal refresh selection.
+- `src/vink3/input/InputService.*` remains a polling input task and suppresses event generation while display push is active.
+- `src/vink3/state/StateMachine.*` is the state owner and triggers UI renders/DisplayService commits via queued messages.
+- `tests/local_firmware_smoke.py` now detects v0.3 mode and checks v0.3 architecture invariants instead of only v0.2 shell guards.
+
+Next port work should move beyond the scaffold into the larger ReadPaper subsystems:
+
+1. Port/adapt latest `src/tasks/timer_interrupt_task.*` and `src/tasks/device_interrupt_task.*` behavior for timer-driven polling, battery, power, and orientation.
+2. Port/adapt latest `src/text/bin_font_print.*`, `font_decoder.*`, `font_buffer.*`, `font_color_mapper.*`, and `zh_conv.*` into a Vink text engine instead of keeping the old Vink built-in font path.
+3. Port the latest ReadPaper book/page pipeline only after the font engine is stable.
+4. Integrate Legado progress sync on top of Vink reader events, not inside UI drawing.
