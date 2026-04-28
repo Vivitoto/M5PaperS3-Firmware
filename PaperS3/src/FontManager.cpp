@@ -10,7 +10,7 @@ static bool ensureFontResourceFS() {
     static bool ok = false;
     if (!tried) {
         tried = true;
-        ok = SPIFFS.begin(true);
+        ok = SPIFFS.begin(false);
         Serial.printf("[FS] SPIFFS %s\n", ok ? "mounted" : "mount failed");
     }
     return ok;

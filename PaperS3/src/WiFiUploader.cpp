@@ -120,7 +120,7 @@ bool WebFileManager::start(const char* ssid, const char* password) {
     }
     
     Serial.printf("[WiFi] Connected, IP: %s\n", WiFi.localIP().toString().c_str());
-    if (!SPIFFS.begin(true)) {
+    if (!SPIFFS.begin(false)) {
         Serial.println("[FS] SPIFFS mount failed");
     }
     
@@ -381,7 +381,7 @@ void WebFileManager::handleApiMkdir() {
 void WebFileManager::handleApiStatus() {
     size_t spiffsTotal = 0;
     size_t spiffsUsed = 0;
-    if (SPIFFS.begin(true)) {
+    if (SPIFFS.begin(false)) {
         spiffsTotal = SPIFFS.totalBytes();
         spiffsUsed = SPIFFS.usedBytes();
     }

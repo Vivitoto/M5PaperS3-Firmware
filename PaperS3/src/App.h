@@ -45,6 +45,7 @@ private:
     unsigned long _toastUntil;
     char _toastText[96];
     bool _shutdownInProgress;
+    bool _sdReady;
     unsigned long _powerButtonPressStart;
     
     // 触摸状态

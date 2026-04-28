@@ -42,7 +42,7 @@ App::App() : _state(AppState::INIT), _reader(_font), _touching(false), _touchLon
              _lastActivityTime(0), _sleepPending(false), _powerButtonArmed(false),
              _toastVisible(false), _toastDirty(false), _toastClearDirty(false),
              _toastDrawn(false), _toastDrawState(AppState::INIT), _toastUntil(0),
-             _shutdownInProgress(false), _powerButtonPressStart(0),
+             _shutdownInProgress(false), _sdReady(false), _powerButtonPressStart(0),
              _sleepTimeoutMin(AUTO_SLEEP_DEFAULT_MIN),
              _fontCount(0) {
     memset(_gotoPageInput, 0, sizeof(_gotoPageInput));
@@ -60,6 +60,7 @@ App::App() : _state(AppState::INIT), _reader(_font), _touching(false), _touchLon
     _toastUntil = 0;
     _wifiConfigured = false;
     _legadoConfigured = false;
+    _sdReady = false;
     _legadoPort = 80;
     _touchStartX = _touchStartY = _touchLastX = _touchLastY = 0;
     _touchConsumed = false;
@@ -92,6 +93,7 @@ bool App::init() {
     }
     
     bool sdReady = initSD();
+    _sdReady = sdReady;
     if (!sdReady) {
         showMessage("SD卡异常，继续启动", 3000);
         Serial.println("[App] SD init failed, continuing for boot diagnostics");
@@ -109,23 +111,27 @@ bool App::init() {
         if (!SD.exists(PROGRESS_DIR)) SD.mkdir(PROGRESS_DIR);
     }
     
-    // 扫描可用字体
-    if (sdReady) scanFonts();
-    
-    if (sdReady) _browser.scan(BOOKS_DIR);
+    // Do not block or risk watchdog/reset before first UI frame. Font/book scans
+    // can be triggered later by the relevant pages/actions. v0.2.13 showed repeated
+    // boot diagnostic refreshes on real hardware, which points to an early boot loop.
+    _fontCount = 0;
+
     _state = AppState::TAB_READING;
     _activeTab = 0;
     for (int i = 0; i < 4; i++) _tabNeedsRender[i] = true;
     
-    loadGlobalSettings();
+    if (_sdReady) {
+        loadGlobalSettings();
+        _stats.load();
+        _recent.load();
+        loadWiFiConfig();
+        loadLegadoConfig();
+    } else {
+        _sleepTimeoutMin = AUTO_SLEEP_DEFAULT_MIN;
+    }
     _lastActivityTime = millis();
     _sleepPending = false;
     _powerButtonArmed = false;
-    
-    _stats.load();
-    _recent.load();
-    loadWiFiConfig();
-    loadLegadoConfig();
     
     Serial.println("[App] Init complete");
     return true;
@@ -148,30 +154,11 @@ bool App::initDisplay() {
     }
     Serial.printf("[Display] %dx%d\n", display.width(), display.height());
 
-    // ReadPaper-style draw path: render into a 4bpp M5Canvas and pushSprite,
-    // instead of drawing directly to M5.Display then calling display().
-    M5Canvas canvas(&display);
-    canvas.setColorDepth(4);
-    canvas.createSprite(SCREEN_WIDTH, SCREEN_HEIGHT);
-    canvas.fillSprite(15);
-    canvas.setTextColor(0, 15);
-    canvas.setTextSize(2);
-    canvas.setCursor(24, 32);
-    canvas.println("Vink-PaperS3");
-    canvas.setTextSize(1);
-    canvas.setCursor(24, 76);
-    canvas.println("v0.2.13 触控优化");
-    canvas.setCursor(24, 104);
-    canvas.printf("Display %dx%d", display.width(), display.height());
-    canvas.setCursor(24, 132);
-    canvas.printf("PSRAM %u KB", ESP.getPsramSize() / 1024);
-    canvas.drawRect(24, 180, 180, 80, 0);
-    canvas.fillRect(230, 180, 180, 80, 0);
-    display.waitDisplay();
-    canvas.pushSprite(0, 0);
-    display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-    display.waitDisplay();
-    delay(900);
+    // Keep boot display non-blocking. v0.2.13 could remain on this diagnostic
+    // screen on real PaperS3 because startup called pushSprite() + display() +
+    // waitDisplay() before the app state machine was alive. The first real shell
+    // frame will be committed by handleTabReading() after init completes.
+    display.fillScreen(BG_LIGHT);
     return true;
 }
 
@@ -2591,6 +2578,11 @@ void App::handleTabLibrary() {
     prepareShellFrame();
     renderTopTabs();
 
+    static bool libraryScanned = false;
+    if (!libraryScanned && _sdReady) {
+        _browser.scan(BOOKS_DIR);
+        libraryScanned = true;
+    }
     const int totalBooks = _browser.getItemCount();
     const int booksPerPage = 9;
     _libraryTotalPages = (totalBooks + booksPerPage - 1) / booksPerPage;

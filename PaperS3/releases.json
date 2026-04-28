@@ -5,6 +5,32 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v0.2.14",
+      "name": "Vink-PaperS3 v0.2.14 启动卡住修复",
+      "summary": "基于 v0.2.13 修复 PaperS3 刷写后反复停留/刷新启动诊断页的问题：移除启动阶段阻塞式 e-paper 提交，延后书库/字体扫描到 UI 之后，启动配置读取受 SD 状态保护，并避免 SPIFFS 失败时自动格式化。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.2.14",
+      "changelog": "### 启动修复\n- 修复 v0.2.13 在真实 PaperS3 上可能一直停留并周期性刷新 `Vink-PaperS3 / Display / PSRAM` 启动诊断页的问题。\n- 启动阶段不再执行 `pushSprite() + display() + waitDisplay()` 的阻塞式 e-paper 提交，避免 EPD 队列/等待在应用状态机启动前卡住。\n- 启动期不再立即扫描书库和 SD 字体，改为进入对应页面后再懒加载，降低早期 watchdog/reset 风险。\n- 启动期配置/统计/最近书籍读取受 SD 初始化状态保护；SD 异常时使用默认值先进入 UI。\n- SPIFFS 挂载失败时不再自动格式化，避免坏资源分区或临时挂载失败导致长时间阻塞；WiFi 传书状态页也同步改为非格式化挂载。\n- 第一帧正式 UI 由主界面渲染路径接管，保留 v0.2.13 的触控、toast、Reader Canvas、正文排版和分页缓存优化。\n\n### 沿用 v0.2.13\n- 触控轮询加快、Tab 按下即局部反馈、普通提示非阻塞 toast。\n- Reader 4bpp Canvas 离屏渲染、正文中英混排断行、标点禁则、跨页段首缩进修复。\n- 分页缓存与 full 镜像默认烧录。\n",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v0.2.14-boot-unblock-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.14/Vink-PaperS3-v0.2.14-boot-unblock-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        },
+        "ota": {
+          "name": "Vink-PaperS3-v0.2.14-boot-unblock-ota.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.14/Vink-PaperS3-v0.2.14-boot-unblock-ota.bin",
+          "size": 1901824,
+          "flashOffset": 65536
+        },
+        "spiffs": {
+          "name": "Vink-PaperS3-v0.2.14-boot-unblock-spiffs.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.14/Vink-PaperS3-v0.2.14-boot-unblock-spiffs.bin",
+          "size": 4128768
+        }
+      }
+    },
+    {
       "version": "v0.2.13",
       "name": "Vink-PaperS3 v0.2.13 触控响应与英文字距优化",
       "summary": "基于 v0.2.12 继续系统性优化触摸响应、显示刷新与正文阅读：提高触摸轮询频率，Tab 按下即局部反馈，普通提示改为非阻塞 toast，Reader 改为离屏画布统一提交，新增分页缓存，并优化中英混排断行、标点禁则和跨页段首缩进。",
