@@ -420,15 +420,20 @@ const uint8_t* FontManager::getCharBitmapGray(uint32_t unicode, uint8_t& outWidt
 }
 
 uint8_t FontManager::getCharWidth(uint32_t unicode) {
-    // ASCII 字符宽度处理
+    int idx = findCharIndex(unicode);
+
+    // ASCII used to be forced to fontSize/2. That made wide English glyphs such
+    // as W/M/Vink-PaperS3 overlap visually because drawUiGlyph() rendered the
+    // actual bitmap but the cursor advanced by only a fixed half-width.
     if (unicode < 128) {
-        if (unicode == ' ' || unicode == '\t') {
-            return getFontSize() / 2;  // 空格半宽
+        if (unicode == ' ' || unicode == '\t') return getFontSize() / 2;
+        if (idx >= 0) {
+            if (_fontType == FontType::GRAY_4BPP) return _index_gray[idx].width;
+            return _index_1bpp[idx].width;
         }
-        return getFontSize() / 2;  // ASCII 半宽
+        return getFontSize() / 2;
     }
     
-    int idx = findCharIndex(unicode);
     if (idx < 0) return getFontSize();  // 字符不存在，返回默认宽度
     
     if (_fontType == FontType::GRAY_4BPP) {
@@ -438,11 +443,17 @@ uint8_t FontManager::getCharWidth(uint32_t unicode) {
 }
 
 uint8_t FontManager::getCharAdvance(uint32_t unicode) {
+    int idx = findCharIndex(unicode);
+
     if (unicode < 128) {
-        return getFontSize() / 2;
+        if (unicode == ' ' || unicode == '\t') return getFontSize() / 2;
+        if (idx >= 0) {
+            uint8_t adv = (_fontType == FontType::GRAY_4BPP) ? _index_gray[idx].advance : _index_1bpp[idx].width;
+            return min<uint8_t>(255, adv + 1);  // light UI tracking for Latin text
+        }
+        return getFontSize() / 2 + 1;
     }
     
-    int idx = findCharIndex(unicode);
     if (idx < 0) return getFontSize();
     
     if (_fontType == FontType::GRAY_4BPP) {

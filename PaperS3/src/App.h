@@ -37,12 +37,20 @@ private:
     unsigned long _lastActivityTime;
     bool _sleepPending;
     bool _powerButtonArmed;
+    bool _toastVisible;
+    bool _toastDirty;
+    bool _toastClearDirty;
+    bool _toastDrawn;
+    AppState _toastDrawState;
+    unsigned long _toastUntil;
+    char _toastText[96];
     bool _shutdownInProgress;
     unsigned long _powerButtonPressStart;
     
     // 触摸状态
     bool _touching;
     bool _touchLongPressFired;
+    bool _touchConsumed;
     int _touchStartX, _touchStartY;
     int _touchLastX, _touchLastY;
     unsigned long _touchStartTime;
@@ -174,4 +182,8 @@ private:
     
     // 显示消息
     void showMessage(const char* msg, int durationMs = 2000);
+    void showToast(const char* msg, int durationMs = 1600);
+    void serviceToast();
+    bool drawToastNow();
+    bool clearToastNow();
 };

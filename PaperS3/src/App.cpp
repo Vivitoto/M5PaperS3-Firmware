@@ -18,6 +18,7 @@ static uint32_t gShellCommitCount = 0;
 
 static void prepareShellFrame();
 static void commitShellFrame();
+static void commitTopTabsFeedback(int activeTab);
 static void drawBackHeader(const char* title, const char* hint = "点 < / 右滑 / 上滑返回");
 static void drawUiText(int16_t x, int16_t y, const char* text, uint16_t color = TEXT_BLACK, uint16_t bg = BG_LIGHT);
 static void drawUiTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const char* text, uint16_t color = TEXT_BLACK);
@@ -32,13 +33,15 @@ static void drawSlotIcon(int16_t x, int16_t y, const char* kind, uint16_t color 
 static void drawRowIcon(int16_t x, int16_t y, const char* kind);
 static void drawIconLabel(int16_t x, int16_t y, const char* icon, const char* label, uint16_t bg = BG_WHITE);
 
-App::App() : _state(AppState::INIT), _reader(_font), _touching(false), _touchLongPressFired(false),
+App::App() : _state(AppState::INIT), _reader(_font), _touching(false), _touchLongPressFired(false), _touchConsumed(false),
              _menuIndex(0), _layoutEditorIndex(0), _chapterMenuIndex(0), _chapterMenuScroll(0),
              _bookmarkMenuIndex(0), _bookmarkMenuScroll(0),
              _fontMenuIndex(0), _fontMenuScroll(0), _settingsScroll(0),
              _activeTab(0), _libraryPage(0), _libraryTotalPages(1), _librarySelected(0),
              _gotoPageCursor(0),
              _lastActivityTime(0), _sleepPending(false), _powerButtonArmed(false),
+             _toastVisible(false), _toastDirty(false), _toastClearDirty(false),
+             _toastDrawn(false), _toastDrawState(AppState::INIT), _toastUntil(0),
              _shutdownInProgress(false), _powerButtonPressStart(0),
              _sleepTimeoutMin(AUTO_SLEEP_DEFAULT_MIN),
              _fontCount(0) {
@@ -48,10 +51,18 @@ App::App() : _state(AppState::INIT), _reader(_font), _touching(false), _touchLon
     memset(_legadoHost, 0, sizeof(_legadoHost));
     memset(_legadoUser, 0, sizeof(_legadoUser));
     memset(_legadoPass, 0, sizeof(_legadoPass));
+    memset(_toastText, 0, sizeof(_toastText));
+    _toastVisible = false;
+    _toastDirty = false;
+    _toastClearDirty = false;
+    _toastDrawn = false;
+    _toastDrawState = AppState::INIT;
+    _toastUntil = 0;
     _wifiConfigured = false;
     _legadoConfigured = false;
     _legadoPort = 80;
     _touchStartX = _touchStartY = _touchLastX = _touchLastY = 0;
+    _touchConsumed = false;
     for (int i = 0; i < 4; i++) _tabNeedsRender[i] = true;
 }
 
@@ -149,7 +160,7 @@ bool App::initDisplay() {
     canvas.println("Vink-PaperS3");
     canvas.setTextSize(1);
     canvas.setCursor(24, 76);
-    canvas.println("v0.2.12 刷新优化");
+    canvas.println("v0.2.13 触控优化");
     canvas.setCursor(24, 104);
     canvas.printf("Display %dx%d", display.width(), display.height());
     canvas.setCursor(24, 132);
@@ -158,8 +169,9 @@ bool App::initDisplay() {
     canvas.fillRect(230, 180, 180, 80, 0);
     display.waitDisplay();
     canvas.pushSprite(0, 0);
+    display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     display.waitDisplay();
-    delay(4000);
+    delay(900);
     return true;
 }
 
@@ -219,6 +231,7 @@ void App::run() {
         checkAutoSleep();
         checkBleCommands();
         _uploader.handleClient();
+        serviceToast();
         
         switch (_state) {
             case AppState::INIT:
@@ -275,7 +288,9 @@ void App::run() {
             default:
                 break;
         }
-        delay(50);
+        // Keep touch polling snappy. M5Unified examples update input every loop;
+        // a 50ms sleep made tap-release detection feel sticky on PaperS3.
+        delay(8);
     }
 }
 
@@ -375,9 +390,24 @@ void App::processTouch() {
         if (!_touching) {
             _touching = true;
             _touchLongPressFired = false;
+            _touchConsumed = false;
             _touchStartX = _touchLastX = x;
             _touchStartY = _touchLastY = y;
             _touchStartTime = millis();
+
+            // Start tab switching on touch-down rather than waiting for release.
+            // PaperS3 screen refresh is slow enough that saving one release cycle
+            // is noticeable, and the top tab zone is not used for vertical swipes.
+            if (isTabState(_state) && y < TOP_TAB_H) {
+                const int tabBaseX = 20;
+                const int tabW = (SCREEN_WIDTH - 40) / 4;
+                int clickedTab = (x - tabBaseX) / tabW;
+                if (x >= tabBaseX && x <= SCREEN_WIDTH - 20 && clickedTab >= 0 && clickedTab < 4 && clickedTab != _activeTab) {
+                    switchTab(clickedTab);
+                    commitTopTabsFeedback(_activeTab);
+                    _touchConsumed = true;
+                }
+            }
             return;
         }
 
@@ -400,8 +430,9 @@ void App::processTouch() {
         int dy = _touchLastY - _touchStartY;
         unsigned long dt = millis() - _touchStartTime;
 
-        if (_touchLongPressFired) {
+        if (_touchLongPressFired || _touchConsumed) {
             _touchLongPressFired = false;
+            _touchConsumed = false;
             return;
         }
 
@@ -440,7 +471,7 @@ void App::onTap(int x, int y) {
     if (_state == AppState::SETTINGS_FONT) {
         int idx = (y - 112) / 92;
         if (idx >= 0 && idx < _fontCount) {
-            if (_font.loadFont(_fontPaths[idx])) showMessage("字体已切换", 800);
+            if (_font.loadFont(_fontPaths[idx])) showToast("字体已切换", 900);
             _state = AppState::TAB_SETTINGS;
             _tabNeedsRender[3] = true;
         }
@@ -504,7 +535,7 @@ void App::onTap(int x, int y) {
                     if (x >= contentLeft() + 80 && x <= contentRight() - 80 && y >= contentTop() + 260 && y <= contentTop() + 328) {
                         _browser.scan(BOOKS_DIR);
                         _tabNeedsRender[1] = true;
-                        showMessage("已重新扫描SD卡", 800);
+                        showToast("已重新扫描SD卡", 900);
                     }
                     return;
                 }
@@ -551,10 +582,10 @@ void App::onTap(int x, int y) {
                 auto toggleWiFi = [&]() {
                     if (_uploader.isRunning()) {
                         _uploader.stop();
-                        showMessage("WiFi传书已关闭", 1200);
+                        showToast("WiFi传书已关闭", 1200);
                     } else {
                         _uploader.start(_wifiSsid, _wifiPass);
-                        showMessage("WiFi传书已开启", 1200);
+                        showToast("WiFi传书已开启", 1200);
                     }
                     _tabNeedsRender[2] = true;
                 };
@@ -594,10 +625,10 @@ void App::onTap(int x, int y) {
                     case 3:
                         if (_ble.isRunning()) {
                             _ble.stop();
-                            showMessage("蓝牙翻页已关闭", 1200);
+                            showToast("蓝牙翻页已关闭", 1200);
                         } else {
                             _ble.start();
-                            showMessage("蓝牙翻页已开启", 1200);
+                            showToast("蓝牙翻页已开启", 1200);
                         }
                         _tabNeedsRender[2] = true;
                         break;
@@ -651,7 +682,7 @@ void App::onTap(int x, int y) {
                             saveGlobalSettings();
                             _tabNeedsRender[3] = true;
                             break;
-                        case 7: showMessage("Vink-PaperS3 v0.2.12", 3000); break;
+                        case 7: showToast("Vink-PaperS3 v0.2.13", 1800); break;
                     }
                 }
                 return;
@@ -686,7 +717,7 @@ void App::onTap(int x, int y) {
                     if (_browser.enterDirectory(_browser.getSelectedIndex())) {
                         _browser.render();
                     } else {
-                        showMessage("进入目录失败!");
+                        showToast("进入目录失败", 1200);
                     }
                 } else if (item && _reader.openBook(item->path)) {
                     _stats.startReading(item->name);
@@ -694,7 +725,7 @@ void App::onTap(int x, int y) {
                     _state = AppState::READER;
                     _reader.renderPage();
                 } else {
-                    showMessage("打开失败!");
+                    showToast("打开失败", 1200);
                 }
             }
             break;
@@ -746,7 +777,7 @@ void App::onTap(int x, int y) {
         case AppState::MENU_FONT: {
             if (_fontCount > 0 && _fontMenuIndex < _fontCount) {
                 if (_font.loadFont(_fontPaths[_fontMenuIndex])) {
-                    showMessage("字体已切换", 1000);
+                    showToast("字体已切换", 1000);
                     if (_reader.isOpen()) {
                         _reader.renderPage();
                     }
@@ -775,7 +806,7 @@ void App::onTap(int x, int y) {
                             _reader.gotoPage(page);
                             _state = AppState::READER;
                         } else {
-                            showMessage("页码超出范围");
+                            showToast("页码超出范围", 1200);
                         }
                     }
                 } else if (keyIdx >= 0 && keyIdx < 9) { // 1-9
@@ -1077,8 +1108,8 @@ void App::executeMenuItem(int index) {
                 break;
             }
             case 1: // 添加书签
-                if (_reader.addBookmark()) showMessage("书签已添加", 1500);
-                else showMessage("添加失败", 1500);
+                if (_reader.addBookmark()) showToast("书签已添加", 1200);
+                else showToast("添加失败", 1200);
                 _state = AppState::READER;
                 _reader.renderPage();
                 break;
@@ -1108,10 +1139,10 @@ void App::executeMenuItem(int index) {
             case 7: // WiFi传书
                 if (_uploader.isRunning()) {
                     _uploader.stop();
-                    showMessage("WiFi传书已关闭", 1500);
+                    showToast("WiFi传书已关闭", 1200);
                 } else {
                     _uploader.start(_wifiSsid, _wifiPass);
-                    showMessage("WiFi传书已开启", 1500);
+                    showToast("WiFi传书已开启", 1200);
                 }
                 _state = AppState::READER;
                 _reader.renderPage();
@@ -1122,10 +1153,10 @@ void App::executeMenuItem(int index) {
             case 9: // 蓝牙翻页
                 if (_ble.isRunning()) {
                     _ble.stop();
-                    showMessage("蓝牙翻页已关闭", 1500);
+                    showToast("蓝牙翻页已关闭", 1200);
                 } else {
                     _ble.start();
-                    showMessage("蓝牙翻页已开启", 1500);
+                    showToast("蓝牙翻页已开启", 1200);
                 }
                 _state = AppState::READER;
                 _reader.renderPage();
@@ -1173,9 +1204,9 @@ void App::executeMenuItem(int index) {
         
         case 3: { // 添加书签
             if (_reader.addBookmark()) {
-                showMessage("书签已添加", 1500);
+                showToast("书签已添加", 1200);
             } else {
-                showMessage("添加失败", 1500);
+                showToast("添加失败", 1200);
             }
             _state = AppState::READER;
             break;
@@ -1219,9 +1250,9 @@ void App::executeMenuItem(int index) {
         case 10: { // WiFi传书
             if (_uploader.isRunning()) {
                 _uploader.stop();
-                showMessage("WiFi传书已关闭", 1500);
+                showToast("WiFi传书已关闭", 1200);
             } else {
-                showMessage("请在配置中设置WiFi", 2000);
+                showToast("请在配置中设置WiFi", 1400);
             }
             _state = AppState::READER;
             break;
@@ -1235,10 +1266,10 @@ void App::executeMenuItem(int index) {
         case 12: { // 蓝牙翻页
             if (_ble.isRunning()) {
                 _ble.stop();
-                showMessage("蓝牙翻页已关闭", 1500);
+                showToast("蓝牙翻页已关闭", 1200);
             } else {
                 _ble.start();
-                showMessage("蓝牙翻页已开启", 1500);
+                showToast("蓝牙翻页已开启", 1200);
             }
             _state = AppState::READER;
             break;
@@ -1304,6 +1335,77 @@ void App::showMessage(const char* msg, int durationMs) {
     
     if (durationMs > 0) {
         delay(durationMs);
+    }
+}
+
+void App::showToast(const char* msg, int durationMs) {
+    if (!msg || !msg[0]) return;
+    strlcpy(_toastText, msg, sizeof(_toastText));
+    _toastUntil = millis() + (durationMs > 0 ? (unsigned long)durationMs : 1600UL);
+    _toastVisible = true;
+    _toastDirty = true;
+    _toastClearDirty = false;
+    drawToastNow();
+}
+
+bool App::drawToastNow() {
+    if (!_toastVisible || !_toastDirty || !_toastText[0]) return false;
+    auto& display = M5.Display;
+    if (display.displayBusy()) return false;
+
+    const int16_t x = 72;
+    const int16_t y = SCREEN_HEIGHT - 72;
+    const int16_t w = SCREEN_WIDTH - 144;
+    const int16_t h = 36;
+    display.setEpdMode(epd_mode_t::epd_fastest);
+    display.fillRect(x - 4, y - 4, w + 8, h + 8, BG_LIGHT);
+    display.fillRoundRect(x, y, w, h, 10, BG_WHITE);
+    display.drawRoundRect(x, y, w, h, 10, BORDER_LIGHT);
+
+    bool oldFrameActive = gShellFrameActive;
+    gShellFrameActive = false;
+    UITheme::setDrawTarget(nullptr);
+    drawUiTextCentered(x, y, w, h, _toastText, TEXT_BLACK);
+    gShellFrameActive = oldFrameActive;
+    UITheme::setDrawTarget((oldFrameActive && gShellCanvas) ? static_cast<LovyanGFX*>(gShellCanvas) : nullptr);
+
+    display.display(x - 6, y - 6, w + 12, h + 12);
+    _toastDirty = false;
+    _toastDrawn = true;
+    _toastDrawState = _state;
+    return true;
+}
+
+bool App::clearToastNow() {
+    if (!_toastClearDirty) return false;
+    if (!_toastDrawn || _state != _toastDrawState || _toastDrawState == AppState::READER) {
+        _toastClearDirty = false;
+        _toastDrawn = false;
+        return false;
+    }
+    auto& display = M5.Display;
+    if (display.displayBusy()) return false;
+    const int16_t y = SCREEN_HEIGHT - 84;
+    display.setEpdMode(epd_mode_t::epd_fastest);
+    display.fillRect(48, y, SCREEN_WIDTH - 96, 64, BG_LIGHT);
+    display.display(48, y, SCREEN_WIDTH - 96, 64);
+    _toastClearDirty = false;
+    _toastDrawn = false;
+    return true;
+}
+
+void App::serviceToast() {
+    if (_toastVisible && _toastDirty) {
+        drawToastNow();
+    }
+    if (_toastVisible && millis() >= _toastUntil) {
+        _toastVisible = false;
+        _toastDirty = false;
+        _toastText[0] = '\0';
+        _toastClearDirty = _toastDrawn;
+    }
+    if (_toastClearDirty) {
+        clearToastNow();
     }
 }
 
@@ -2143,7 +2245,7 @@ static void prepareShellFrame() {
     // driver will serialize if it is still busy; avoiding an unconditional
     // wait here makes tab taps feel much less sticky.
     display.powerSaveOff();
-    display.setEpdMode(epd_mode_t::epd_fast);
+    display.setEpdMode(epd_mode_t::epd_fastest);
 
     if (!gShellCanvas) {
         gShellCanvas = new M5Canvas(&display);
@@ -2172,21 +2274,90 @@ static void commitShellFrame() {
     if (gShellCommitCount > 0 && (gShellCommitCount % SHELL_FULL_REFRESH_EVERY) == 0) {
         display.setEpdMode(epd_mode_t::epd_quality);
     } else {
-        // `epd_fastest` is very responsive but leaves obvious ghosting on the
-        // dense Crosslink shell. `epd_fast` is a better default for tab pages.
-        display.setEpdMode(epd_mode_t::epd_fast);
+        // Prefer perceived touch responsiveness for shell/navigation pages.
+        // Quality cleanup still happens every few shell commits to control ghosting.
+        display.setEpdMode(epd_mode_t::epd_fastest);
     }
 
     if (gShellFrameActive && gShellCanvas) {
         UITheme::setDrawTarget(nullptr);
         gShellFrameActive = false;
         gShellCanvas->pushSprite(0, 0);
+        display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
     } else {
         display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
         UITheme::setDrawTarget(nullptr);
         gShellFrameActive = false;
     }
     gShellCommitCount++;
+}
+
+static void commitTopTabsFeedback(int activeTab) {
+    auto& display = M5.Display;
+    if (display.displayBusy()) return;
+
+    bool oldFrameActive = gShellFrameActive;
+    gShellFrameActive = false;
+    UITheme::setDrawTarget(nullptr);
+
+    display.setEpdMode(epd_mode_t::epd_fastest);
+    display.fillRect(0, 0, SCREEN_WIDTH, TOP_TAB_H, BG_LIGHT);
+
+    char timeText[12];
+    formatStatusTime(timeText, sizeof(timeText));
+    drawUiText(22, 8, timeText, TEXT_MID, BG_LIGHT);
+#if BATTERY_ICON_ENABLED
+    BatteryInfo bat = BatteryInfo::read();
+    const int16_t iconX = SCREEN_WIDTH - 44;
+    const int16_t iconY = 10;
+    char batText[12];
+    if (bat.valid) {
+        snprintf(batText, sizeof(batText), "%d%%", bat.level);
+        drawUiTextRight(iconX - 10, 8, batText, TEXT_MID, BG_LIGHT);
+    }
+    display.drawRect(iconX, iconY + 2, 26, 13, TEXT_BLACK);
+    display.drawRect(iconX + 26, iconY + 6, 3, 5, TEXT_BLACK);
+    if (bat.valid) {
+        int fillW = (bat.level * 22) / 100;
+        if (fillW > 0) display.fillRect(iconX + 2, iconY + 4, fillW, 9, TEXT_BLACK);
+    }
+#endif
+    display.drawLine(20, 32, SCREEN_WIDTH - 20, 32, BORDER_LIGHT);
+
+    const char* tabs[] = {"阅读", "书架", "传输", "设置"};
+    const char* icons[] = {"book", "shelf", "send", "settings"};
+    int16_t gap = 8;
+    int16_t tabW = (SCREEN_WIDTH - 48 - gap * 3) / 4;
+    int16_t baseX = 24;
+    int16_t tabY = 50;
+    int16_t boxH = 32;
+    for (int i = 0; i < 4; i++) {
+        bool active = (i == activeTab);
+        int16_t boxX = baseX + i * (tabW + gap);
+        uint16_t c = active ? BG_WHITE : TEXT_MID;
+        uint16_t iconBg = active ? ACCENT : BG_LIGHT;
+        if (active) {
+            display.fillRoundRect(boxX, tabY, tabW, boxH, 8, ACCENT);
+            display.fillTriangle(boxX + tabW / 2 - 8, tabY + boxH, boxX + tabW / 2 + 8, tabY + boxH, boxX + tabW / 2, tabY + boxH + 7, ACCENT);
+        } else {
+            display.drawRoundRect(boxX, tabY, tabW, boxH, 8, BORDER_LIGHT);
+        }
+        int16_t labelW = uiTextWidth(tabs[i]);
+        const int16_t iconW = 30;
+        const int16_t innerGap = 7;
+        int16_t groupW = iconW + innerGap + labelW;
+        int16_t ix = boxX + (tabW - groupW) / 2;
+        int16_t iy = tabY + (boxH - iconW) / 2;
+        int16_t labelX = ix + iconW + innerGap;
+        int16_t labelY = tabY + (boxH - (gUiFont && gUiFont->isLoaded() ? gUiFont->getFontSize() : 16)) / 2 - 2;
+        drawSlotIcon(ix, iy, icons[i], c, iconBg);
+        drawUiText(labelX, labelY, tabs[i], active ? BG_WHITE : TEXT_MID, active ? ACCENT : BG_LIGHT);
+    }
+    display.drawLine(20, TOP_TAB_H - 1, SCREEN_WIDTH - 20, TOP_TAB_H - 1, BORDER_LIGHT);
+    display.display(0, 0, SCREEN_WIDTH, TOP_TAB_H);
+
+    gShellFrameActive = oldFrameActive;
+    UITheme::setDrawTarget((oldFrameActive && gShellCanvas) ? static_cast<LovyanGFX*>(gShellCanvas) : nullptr);
 }
 
 static void drawBackHeader(const char* title, const char* hint) {
@@ -2298,7 +2469,7 @@ void App::switchTab(int tab) {
         case 2: _state = AppState::TAB_TRANSFER; break;
         case 3: _state = AppState::TAB_SETTINGS; break;
     }
-    for (int i = 0; i < 4; i++) _tabNeedsRender[i] = true;
+    _tabNeedsRender[tab] = true;
 }
 
 bool App::isTabState(AppState state) {
@@ -2575,7 +2746,7 @@ void App::handleTabSettings() {
         {"阅读", "正文字体", _fontCount > 0 ? _fontNames[0] : "内置字体", "字号", "小    中    大", false, true},
         {"版式", "对齐方式", "左    中    右    齐", "刷新策略", rs.getLabel(), true, false},
         {"连接", "WiFi配置", _wifiConfigured ? _wifiSsid : "未配置", "Legado同步", _legadoConfigured ? _legadoHost : "未配置", false, false},
-        {"系统", "休眠时间", sleepText, "关于", "Vink-PaperS3 / v0.2.12", false, false},
+        {"系统", "休眠时间", sleepText, "关于", "Vink-PaperS3 / v0.2.13", false, false},
     };
 
     const int cardGap = 14;

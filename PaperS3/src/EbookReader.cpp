@@ -10,7 +10,9 @@ EbookReader::EbookReader(FontManager& font)
     : _font(font), _pages(nullptr), _currentPage(0), _totalPages(0), 
       _fileSize(0), _preloadBuffer(nullptr), _preloadSize(0), 
       _preloadPage(0), _hasPreload(false), _pageTurnCount(0), 
-      _needsFullRefresh(true), _chapters(nullptr), _chapterCount(0),
+      _needsFullRefresh(true), _pageCanvas(nullptr), _drawTarget(nullptr),
+      _readCursorValid(false), _readCursor(0),
+      _chapters(nullptr), _chapterCount(0),
       _chapterCapacity(0), _chaptersDetected(false),
       _bookmarks(nullptr), _bookmarkCount(0), _bookmarkCapacity(0),
       _isEpub(false), _epubChapter(0) {
@@ -26,6 +28,11 @@ EbookReader::~EbookReader() {
     if (_preloadBuffer) {
         heap_caps_free(_preloadBuffer);
         _preloadBuffer = nullptr;
+    }
+    if (_pageCanvas) {
+        _pageCanvas->deleteSprite();
+        delete _pageCanvas;
+        _pageCanvas = nullptr;
     }
 }
 
@@ -198,115 +205,455 @@ void EbookReader::changeFontSize(int delta) {
 }
 
 
+
+struct PageCacheHeaderV2 {
+    char magic[4];
+    uint16_t version;
+    uint16_t pageCount;
+    uint32_t fileSize;
+    uint16_t fontSize;
+    uint16_t contentW;
+    uint16_t contentH;
+    uint16_t lineHeight;
+    char fontPath[64];
+    uint8_t lineSpacing;
+    uint8_t paragraphSpacing;
+    uint8_t marginLeft;
+    uint8_t marginRight;
+    uint8_t marginTop;
+    uint8_t marginBottom;
+    uint8_t indentFirstLine;
+    uint8_t justify;
+    int16_t epubChapter;
+};
+
+static constexpr uint16_t PAGE_CACHE_VERSION = 3;
+
+void EbookReader::getPageCachePath(char* out, size_t len) {
+    snprintf(out, len, "%s/", PROGRESS_DIR);
+    char safeName[72];
+    strncpy(safeName, _bookName, sizeof(safeName) - 1);
+    safeName[sizeof(safeName) - 1] = '\0';
+    for (int i = 0; safeName[i]; i++) {
+        if (safeName[i] == '/' || safeName[i] == '\\' || safeName[i] == ' ') safeName[i] = '_';
+    }
+    strncat(out, safeName, len - strlen(out) - 1);
+    if (_isEpub) {
+        char suffix[24];
+        snprintf(suffix, sizeof(suffix), ".ch%d.pages.bin", _epubChapter);
+        strncat(out, suffix, len - strlen(out) - 1);
+    } else {
+        strncat(out, ".pages.bin", len - strlen(out) - 1);
+    }
+}
+
+bool EbookReader::loadPagesFromCache() {
+    char path[128];
+    getPageCachePath(path, sizeof(path));
+    File f = SD.open(path, FILE_READ);
+    if (!f) return false;
+
+    PageCacheHeaderV2 h{};
+    if (f.read((uint8_t*)&h, sizeof(h)) != sizeof(h)) {
+        f.close();
+        return false;
+    }
+    bool ok = strncmp(h.magic, "VPG2", 4) == 0 &&
+              h.version == PAGE_CACHE_VERSION &&
+              h.pageCount > 0 &&
+              h.fileSize == _fileSize &&
+              h.fontSize == _layout.fontSize &&
+              h.contentW == _layout.contentWidth() &&
+              h.contentH == _layout.contentHeight() &&
+              h.lineHeight == _layout.calcLineHeight() &&
+              strncmp(h.fontPath, _font.getCurrentFontPath(), sizeof(h.fontPath)) == 0 &&
+              h.lineSpacing == _layout.lineSpacing &&
+              h.paragraphSpacing == _layout.paragraphSpacing &&
+              h.marginLeft == _layout.marginLeft &&
+              h.marginRight == _layout.marginRight &&
+              h.marginTop == _layout.marginTop &&
+              h.marginBottom == _layout.marginBottom &&
+              h.indentFirstLine == _layout.indentFirstLine &&
+              h.justify == (_layout.justify ? 1 : 0) &&
+              h.epubChapter == (_isEpub ? _epubChapter : -1);
+    if (!ok) {
+        f.close();
+        return false;
+    }
+
+    PageInfo* cached = (PageInfo*)heap_caps_malloc(h.pageCount * sizeof(PageInfo), MALLOC_CAP_SPIRAM);
+    if (!cached) {
+        f.close();
+        return false;
+    }
+    for (uint16_t i = 0; i < h.pageCount; ++i) {
+        uint32_t start = 0, end = 0;
+        uint8_t startsPara = 0;
+        if (f.read((uint8_t*)&start, sizeof(start)) != sizeof(start) ||
+            f.read((uint8_t*)&end, sizeof(end)) != sizeof(end) ||
+            f.read(&startsPara, 1) != 1 || start > end || end > _fileSize) {
+            heap_caps_free(cached);
+            f.close();
+            return false;
+        }
+        cached[i].startOffset = start;
+        cached[i].endOffset = end;
+        cached[i].startsParagraph = startsPara != 0;
+    }
+    f.close();
+
+    clearPages();
+    _pages = cached;
+    _totalPages = h.pageCount;
+    Serial.printf("[Reader] Loaded page cache: %d pages\n", _totalPages);
+    return true;
+}
+
+void EbookReader::savePagesToCache() {
+    if (!_pages || _totalPages == 0) return;
+    if (!SD.exists(PROGRESS_DIR)) SD.mkdir(PROGRESS_DIR);
+
+    char path[128];
+    getPageCachePath(path, sizeof(path));
+    File f = SD.open(path, FILE_WRITE);
+    if (!f) return;
+
+    PageCacheHeaderV2 h{};
+    memcpy(h.magic, "VPG2", 4);
+    h.version = PAGE_CACHE_VERSION;
+    h.pageCount = _totalPages;
+    h.fileSize = _fileSize;
+    h.fontSize = _layout.fontSize;
+    h.contentW = _layout.contentWidth();
+    h.contentH = _layout.contentHeight();
+    h.lineHeight = _layout.calcLineHeight();
+    strncpy(h.fontPath, _font.getCurrentFontPath(), sizeof(h.fontPath) - 1);
+    h.fontPath[sizeof(h.fontPath) - 1] = '\0';
+    h.lineSpacing = _layout.lineSpacing;
+    h.paragraphSpacing = _layout.paragraphSpacing;
+    h.marginLeft = _layout.marginLeft;
+    h.marginRight = _layout.marginRight;
+    h.marginTop = _layout.marginTop;
+    h.marginBottom = _layout.marginBottom;
+    h.indentFirstLine = _layout.indentFirstLine;
+    h.justify = _layout.justify ? 1 : 0;
+    h.epubChapter = _isEpub ? _epubChapter : -1;
+    f.write((const uint8_t*)&h, sizeof(h));
+    for (uint16_t i = 0; i < _totalPages; ++i) {
+        f.write((const uint8_t*)&_pages[i].startOffset, sizeof(_pages[i].startOffset));
+        f.write((const uint8_t*)&_pages[i].endOffset, sizeof(_pages[i].endOffset));
+        uint8_t startsPara = _pages[i].startsParagraph ? 1 : 0;
+        f.write(&startsPara, 1);
+    }
+    f.close();
+    Serial.printf("[Reader] Saved page cache: %d pages\n", _totalPages);
+}
+
+
+
+uint16_t EbookReader::sumLineWidth(LineChar* chars, uint8_t count) {
+    uint16_t w = 0;
+    for (uint8_t i = 0; i < count; ++i) w += chars[i].width;
+    return w;
+}
+
+LovyanGFX& EbookReader::drawTarget() {
+    return _drawTarget ? *_drawTarget : static_cast<LovyanGFX&>(M5.Display);
+}
+
+bool EbookReader::ensurePageCanvas() {
+    if (_pageCanvas && _pageCanvas->getBuffer()) return true;
+    if (!_pageCanvas) {
+        _pageCanvas = new M5Canvas(&M5.Display);
+    }
+    if (!_pageCanvas) return false;
+    _pageCanvas->setPsram(true);
+    _pageCanvas->setColorDepth(4);
+    if (!_pageCanvas->createSprite(SCREEN_WIDTH, SCREEN_HEIGHT)) {
+        Serial.println("[Reader] Failed to allocate page canvas, fallback to direct display");
+        delete _pageCanvas;
+        _pageCanvas = nullptr;
+        return false;
+    }
+    return true;
+}
+
+bool EbookReader::waitDisplayReady(uint32_t timeoutMs) {
+    auto& display = M5.Display;
+    uint32_t start = millis();
+    while (display.displayBusy() && millis() - start < timeoutMs) {
+        M5.update();
+        delay(5);
+        yield();
+    }
+    if (display.displayBusy()) {
+        Serial.printf("[Reader] EPD queue still busy after %lu ms; defer render\n", (unsigned long)(millis() - start));
+        return false;
+    }
+    // displayBusy() only reports queue saturation in M5GFX. waitDisplay() is the
+    // actual guard before destructive full-page reader drawing.
+    display.waitDisplay();
+    return true;
+}
+
+bool EbookReader::isWhitespace(uint32_t unicode) {
+    return unicode == ' ' || unicode == '\t' || unicode == 0x3000;
+}
+
+bool EbookReader::isBreakableAfter(uint32_t unicode) {
+    return isWhitespace(unicode) || unicode == '-' || unicode == 0x2010 || unicode == 0x2013 || unicode == 0x2014;
+}
+
+bool EbookReader::isForbiddenLineStart(uint32_t unicode) {
+    switch (unicode) {
+        case ',': case '.': case ';': case ':': case '!': case '?':
+        case '>': case ']': case '}': case ')':
+        case 0xFF0C: case 0x3002: case 0x3001: case 0xFF1B: case 0xFF1A:
+        case 0xFF01: case 0xFF1F: case 0x300B: case 0x300D: case 0x300F:
+        case 0x3011: case 0x3015: case 0xFF09: case 0x2019: case 0x201D:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool EbookReader::isOpeningPairPunctuation(uint32_t unicode) {
+    switch (unicode) {
+        case '(': case '[': case '{': case '<':
+        case 0xFF08: case 0x3010: case 0x3008: case 0x300A:
+        case 0x201C: case 0x2018: case 0x300C: case 0x300E:
+            return true;
+        default:
+            return false;
+    }
+}
+
+uint8_t EbookReader::charAdvanceForLayout(uint32_t unicode) {
+    if (unicode == '\r' || unicode == '\n') return 0;
+    return _font.getCharAdvance(unicode);
+}
+
+bool EbookReader::readCharAt(uint32_t offset, uint32_t maxOffset, uint32_t& unicode, uint32_t& nextOffset) {
+    unicode = 0;
+    nextOffset = offset;
+    if (!_file || offset >= maxOffset) return false;
+    uint8_t buf[6] = {0};
+
+    if (!_readCursorValid || _readCursor != offset) {
+        _file.seek(offset);
+    }
+
+    int readLen = _file.read(buf, 1);
+    if (readLen <= 0) {
+        _readCursorValid = false;
+        return false;
+    }
+    _readCursorValid = true;
+    _readCursor = offset + 1;
+
+    size_t pos = 0;
+    unicode = decodeUTF8(buf, pos, 1);
+    int needMore = 0;
+    if ((buf[0] & 0xE0) == 0xC0) needMore = 1;
+    else if ((buf[0] & 0xF0) == 0xE0) needMore = 2;
+    else if ((buf[0] & 0xF8) == 0xF0) needMore = 3;
+    if (needMore > 0 && offset + 1 < maxOffset) {
+        int canRead = min<int>(needMore, maxOffset - offset - 1);
+        int got = _file.read(buf + 1, canRead);
+        _readCursor += got;
+        pos = 0;
+        unicode = decodeUTF8(buf, pos, 1 + got);
+    }
+    if (pos == 0) pos = 1;
+    nextOffset = offset + pos;
+    if (nextOffset > maxOffset) nextOffset = maxOffset;
+    _readCursor = nextOffset;
+    return true;
+}
+
+bool EbookReader::layoutNextLine(uint32_t startOffset, uint32_t maxOffset, LineChar* chars, uint8_t maxChars,
+                                 uint8_t& count, uint16_t& lineWidth, uint32_t& nextOffset,
+                                 bool paragraphStart, bool& paragraphEnded) {
+    count = 0;
+    lineWidth = 0;
+    nextOffset = startOffset;
+    paragraphEnded = false;
+    if (!_file || startOffset >= maxOffset) return false;
+
+    const uint16_t indentPixels = paragraphStart ? _layout.indentFirstLine * _layout.fontSize : 0;
+    const uint16_t contentW = _layout.contentWidth();
+    const uint16_t availableW = (indentPixels < contentW) ? (contentW - indentPixels) : contentW;
+    uint32_t offset = startOffset;
+    int lastBreakAfter = -1;
+
+    while (offset < maxOffset) {
+        uint32_t ch = 0;
+        uint32_t charEnd = offset;
+        if (!readCharAt(offset, maxOffset, ch, charEnd) || charEnd <= offset) break;
+
+        if (ch == '\r') {
+            offset = charEnd;
+            continue;
+        }
+        if (ch == '\n') {
+            paragraphEnded = true;
+            nextOffset = charEnd;
+            return true;
+        }
+
+        // Do not carry whitespace to the beginning of a visual line.
+        if (count == 0 && isWhitespace(ch)) {
+            offset = charEnd;
+            startOffset = offset;
+            nextOffset = offset;
+            continue;
+        }
+
+        uint8_t w = charAdvanceForLayout(ch);
+        uint32_t projected = (uint32_t)lineWidth + w;
+        if (count > 0 && projected > availableW) {
+            // Pull closing punctuation into the previous line if the overflow is small.
+            if (isForbiddenLineStart(ch) && projected <= (uint32_t)availableW * 115 / 100 && count < maxChars) {
+                chars[count++] = {ch, offset, charEnd, w};
+                lineWidth += w;
+                nextOffset = charEnd;
+                return true;
+            }
+
+            if (lastBreakAfter > 0) {
+                uint16_t widthAfterBreak = 0;
+                for (uint8_t i = lastBreakAfter; i < count; ++i) widthAfterBreak += chars[i].width;
+                if (widthAfterBreak <= (uint16_t)((uint32_t)availableW * 45 / 100)) {
+                    bool breakCharIsWhitespace = isWhitespace(chars[lastBreakAfter - 1].unicode);
+                    nextOffset = chars[lastBreakAfter - 1].byteEnd;
+                    count = breakCharIsWhitespace ? (uint8_t)(lastBreakAfter - 1) : (uint8_t)lastBreakAfter;
+                    while (count > 0 && isWhitespace(chars[count - 1].unicode)) count--;
+                    lineWidth = sumLineWidth(chars, count);
+                    return true;
+                }
+            }
+
+            // Opening quotes/brackets look bad at line end; push them to the next line.
+            if (count > 1 && isOpeningPairPunctuation(chars[count - 1].unicode)) {
+                nextOffset = chars[count - 1].byteStart;
+                count--;
+                lineWidth = sumLineWidth(chars, count);
+                return true;
+            }
+
+            nextOffset = offset;
+            return true;
+        }
+
+        if (count < maxChars) {
+            chars[count++] = {ch, offset, charEnd, w};
+            lineWidth += w;
+            if (isBreakableAfter(ch)) lastBreakAfter = count;
+        } else {
+            nextOffset = offset;
+            return true;
+        }
+        offset = charEnd;
+        nextOffset = offset;
+    }
+    return count > 0;
+}
+
 bool EbookReader::buildPages() {
     clearPages();
     if (!_file || _fileSize == 0 || !_font.isLoaded()) {
         Serial.println("[Reader] Cannot build pages: file or font not ready");
         return false;
     }
-    
+
+    if (loadPagesFromCache()) {
+        return true;
+    }
+
     uint16_t lineHeight = _layout.calcLineHeight();
     uint16_t contentW = _layout.contentWidth();
     uint16_t contentH = _layout.contentHeight();
-    
-    size_t estPages = _fileSize / 300 + 100;
-    _pages = (PageInfo*)heap_caps_malloc(estPages * sizeof(PageInfo), MALLOC_CAP_SPIRAM);
+    uint16_t linesPerPage = max<uint16_t>(1, contentH / lineHeight);
+
+    size_t pageCapacity = _fileSize / 300 + 100;
+    if (pageCapacity < 64) pageCapacity = 64;
+    _pages = (PageInfo*)heap_caps_malloc(pageCapacity * sizeof(PageInfo), MALLOC_CAP_SPIRAM);
     if (!_pages) {
         Serial.println("[Reader] Failed to alloc page table");
         return false;
     }
-    
-    Serial.printf("[Reader] Building pages... (font=%dpx, line=%dpx, content=%dx%d)\n",
-                  _layout.fontSize, lineHeight, contentW, contentH);
-    
+
+    auto growPages = [&]() -> bool {
+        if (_totalPages + 1 < pageCapacity) return true;
+        size_t newCapacity = pageCapacity + pageCapacity / 2 + 64;
+        PageInfo* bigger = (PageInfo*)heap_caps_malloc(newCapacity * sizeof(PageInfo), MALLOC_CAP_SPIRAM);
+        if (!bigger) {
+            Serial.printf("[Reader] Failed to grow page table: %u -> %u\n", (unsigned)pageCapacity, (unsigned)newCapacity);
+            return false;
+        }
+        memcpy(bigger, _pages, _totalPages * sizeof(PageInfo));
+        heap_caps_free(_pages);
+        _pages = bigger;
+        pageCapacity = newCapacity;
+        return true;
+    };
+
+    Serial.printf("[Reader] Building pages... (font=%dpx, line=%dpx, content=%dx%d, lines=%d)\n",
+                  _layout.fontSize, lineHeight, contentW, contentH, linesPerPage);
+
     uint32_t offset = 0;
-    _totalPages = 0;
     uint16_t lines = 0;
-    uint16_t currentLineWidth = 0;
-    bool isParagraphStart = true;
-    uint16_t indentPixels = _layout.indentFirstLine * _layout.fontSize;
-    
+    bool paragraphStart = true;
+    _totalPages = 0;
     _pages[0].startOffset = 0;
-    
-    while (offset < _fileSize && _totalPages < estPages - 1) {
-        uint8_t buf[6];
-        _file.seek(offset);
-        int readLen = _file.read(buf, 1);
-        if (readLen <= 0) break;
-        
-        size_t pos = 0;
-        uint32_t ch = decodeUTF8(buf, pos, 1);
-        
-        int needMore = 0;
-        if ((buf[0] & 0xE0) == 0xC0) needMore = 1;
-        else if ((buf[0] & 0xF0) == 0xE0) needMore = 2;
-        else if ((buf[0] & 0xF8) == 0xF0) needMore = 3;
-        
-        if (needMore > 0) {
-            _file.read(buf + 1, needMore);
-            pos = 0;
-            ch = decodeUTF8(buf, pos, needMore + 1);
-        }
-        
-        if (ch == '\n') {
-            lines++;
-            currentLineWidth = 0;
-            isParagraphStart = true;
-            offset += pos;
-            if (lines >= (contentH / lineHeight)) {
-                _pages[_totalPages].endOffset = offset;
-                _totalPages++;
-                if (_totalPages < estPages) {
-                    _pages[_totalPages].startOffset = offset;
+    _pages[0].startsParagraph = true;
+
+    LineChar lineChars[256];
+    invalidateReadCursor();
+    while (offset < _fileSize) {
+        uint32_t before = offset;
+        uint32_t nextOffset = offset;
+        uint8_t count = 0;
+        uint16_t lineWidth = 0;
+        bool paragraphEnded = false;
+        bool hasLine = layoutNextLine(offset, _fileSize, lineChars, 255, count, lineWidth, nextOffset, paragraphStart, paragraphEnded);
+        if (!hasLine && nextOffset <= before) break;
+        if (nextOffset <= before) nextOffset = before + 1;
+
+        lines++;
+        offset = nextOffset;
+        paragraphStart = paragraphEnded;
+
+        if (lines >= linesPerPage || offset >= _fileSize) {
+            if (!growPages()) {
+                clearPages();
+                _totalPages = 0;
+                return false;
+            }
+            _pages[_totalPages].endOffset = offset;
+            _totalPages++;
+            if (offset < _fileSize) {
+                if (!growPages()) {
+                    clearPages();
+                    _totalPages = 0;
+                    return false;
                 }
-                lines = 0;
-                currentLineWidth = 0;
-                isParagraphStart = true;
+                _pages[_totalPages].startOffset = offset;
+                _pages[_totalPages].startsParagraph = paragraphStart;
             }
-            continue;
+            lines = 0;
         }
-        
-        if (ch == '\r') {
-            offset += pos;
-            continue;
-        }
-        
-        uint8_t charW = _font.getCharAdvance(ch);
-        uint16_t lineStartX = 0;
-        if (isParagraphStart && _layout.indentFirstLine > 0) {
-            lineStartX = indentPixels;
-        }
-        
-        if (currentLineWidth > 0 && currentLineWidth + charW + lineStartX > contentW) {
-            lines++;
-            currentLineWidth = 0;
-            isParagraphStart = false;
-            if (lines >= (contentH / lineHeight)) {
-                _pages[_totalPages].endOffset = offset;
-                _totalPages++;
-                if (_totalPages < estPages) {
-                    _pages[_totalPages].startOffset = offset;
-                }
-                lines = 0;
-                currentLineWidth = 0;
-                isParagraphStart = true;
-                continue;
-            }
-            if (ch != ' ') {
-                isParagraphStart = true;
-            }
-        }
-        
-        currentLineWidth += charW;
-        offset += pos;
     }
-    
-    if (_totalPages < estPages) {
-        _pages[_totalPages].endOffset = offset;
-        _totalPages++;
+
+    if (_totalPages == 0 && _fileSize > 0) {
+        _pages[0].startOffset = 0;
+        _pages[0].endOffset = _fileSize;
+        _pages[0].startsParagraph = true;
+        _totalPages = 1;
     }
-    
+
     Serial.printf("[Reader] Total pages: %d\n", _totalPages);
+    if (_totalPages > 0) savePagesToCache();
     return _totalPages > 0;
 }
 
@@ -474,32 +821,55 @@ void EbookReader::gotoCharOffset(uint32_t charOffset) {
 void EbookReader::renderPage() {
     if (!isOpen() || !_pages) return;
     if (_needsFullRefresh || !_refreshStrategy.usePartialUpdate) {
-        renderPageFull();
-        _needsFullRefresh = false;
+        if (renderPageFull()) {
+            _needsFullRefresh = false;
+        }
     } else {
-        renderPageFast();
+        if (!renderPageFast()) {
+            _needsFullRefresh = true;
+        }
     }
 }
 
-void EbookReader::renderPageFull() {
+bool EbookReader::renderPageFull() {
     auto& display = M5.Display;
-    // Vink 刷新策略：周期性使用 GC16 高质量刷新清残影。
+    uint32_t t0 = millis();
+    display.powerSaveOff();
+    if (!waitDisplayReady(2500)) {
+        _needsFullRefresh = true;
+        return false;
+    }
     display.setEpdMode(epd_mode_t::epd_quality);
-    display.clear();
+
+    bool useCanvas = ensurePageCanvas();
+    _drawTarget = useCanvas ? static_cast<LovyanGFX*>(_pageCanvas) : static_cast<LovyanGFX*>(&display);
+    drawTarget().fillScreen(15);
     if (_hasPreload && _preloadPage == _currentPage) {
         drawTextPageFast();
     } else {
         drawTextPage();
     }
     drawStatusBar();
-    display.display();
-    Serial.printf("[Reader] Full refresh: page %d/%d\n", _currentPage + 1, _totalPages);
+    _drawTarget = nullptr;
+
+    if (useCanvas) {
+        _pageCanvas->pushSprite(0, 0);
+        display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    } else {
+        display.display();
+    }
+    Serial.printf("[Reader] Full refresh: page %d/%d, render+commit=%lu ms\n",
+                  _currentPage + 1, _totalPages, (unsigned long)(millis() - t0));
+    return true;
 }
 
-void EbookReader::renderPageFast() {
+bool EbookReader::renderPageFast() {
     auto& display = M5.Display;
-    // Vink 刷新策略：快速翻页按策略动态选择波形。
-    // 极速=DU4(最快/低对比度)，均衡=DU(快/低残影)，清晰=GL16(文本抗锯齿更好)。
+    uint32_t t0 = millis();
+    display.powerSaveOff();
+    if (!waitDisplayReady(1500)) {
+        return false;
+    }
     switch (_refreshStrategy.frequency) {
         case RefreshFrequency::FREQ_LOW:
             display.setEpdMode(epd_mode_t::epd_fastest);
@@ -512,14 +882,27 @@ void EbookReader::renderPageFast() {
             display.setEpdMode(epd_mode_t::epd_text);
             break;
     }
-    display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT - 4, 15);
+
+    bool useCanvas = ensurePageCanvas();
+    _drawTarget = useCanvas ? static_cast<LovyanGFX*>(_pageCanvas) : static_cast<LovyanGFX*>(&display);
+    drawTarget().fillScreen(15);
     if (_hasPreload && _preloadPage == _currentPage) {
         drawTextPageFast();
     } else {
         drawTextPage();
     }
     drawStatusBar();
-    display.display();
+    _drawTarget = nullptr;
+
+    if (useCanvas) {
+        _pageCanvas->pushSprite(0, 0);
+        display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+    } else {
+        display.display();
+    }
+    Serial.printf("[Reader] Fast refresh: page %d/%d, render+commit=%lu ms\n",
+                  _currentPage + 1, _totalPages, (unsigned long)(millis() - t0));
+    return true;
 }
 
 void EbookReader::preloadNextPage() {
@@ -541,175 +924,89 @@ void EbookReader::preloadNextPage() {
 }
 
 void EbookReader::drawTextPageFast() {
-    if (!_hasPreload || _preloadPage != _currentPage) {
-        drawTextPage();
-        return;
-    }
-    auto& display = M5.Display;
-    uint16_t x = _layout.marginLeft;
-    uint16_t y = _layout.marginTop;
-    uint16_t contentW = _layout.contentWidth();
-    uint16_t lineHeight = _layout.calcLineHeight();
-    bool isGrayFont = (_font.getFontType() == FontType::GRAY_4BPP);
-    uint16_t currentLineWidth = 0;
-    bool isParagraphStart = true;
-    uint16_t indentPixels = _layout.indentFirstLine * _layout.fontSize;
-    LineChar lineChars[256];
-    uint8_t lineCharCount = 0;
-    size_t bufPos = 0;
-    while (bufPos < _preloadSize && y < SCREEN_HEIGHT - _layout.marginBottom - lineHeight) {
-        uint8_t buf[6];
-        size_t remaining = _preloadSize - bufPos;
-        for (int i = 0; i < 6 && i < remaining; i++) buf[i] = _preloadBuffer[bufPos + i];
-        size_t charPos = 0;
-        uint32_t ch = decodeUTF8(buf, charPos, remaining > 4 ? 4 : remaining);
-        if (ch == '\n') {
-            if (lineCharCount > 0) {
-                drawLineChars(lineChars, lineCharCount, y, lineHeight, currentLineWidth, isParagraphStart);
-            }
-            y += lineHeight;
-            x = _layout.marginLeft;
-            currentLineWidth = 0;
-            lineCharCount = 0;
-            isParagraphStart = true;
-            bufPos += charPos;
-            continue;
-        }
-        if (ch == '\r') {
-            bufPos += charPos;
-            continue;
-        }
-        uint8_t charW = _font.getCharAdvance(ch);
-        uint16_t lineStartX = isParagraphStart ? indentPixels : 0;
-        if (currentLineWidth > 0 && currentLineWidth + charW + lineStartX > contentW) {
-            if (lineCharCount > 0) {
-                drawLineChars(lineChars, lineCharCount, y, lineHeight, currentLineWidth, isParagraphStart);
-            }
-            y += lineHeight;
-            x = _layout.marginLeft;
-            currentLineWidth = 0;
-            lineCharCount = 0;
-            isParagraphStart = false;
-            if (y > SCREEN_HEIGHT - _layout.marginBottom - lineHeight) break;
-        }
-        if (lineCharCount < 255) {
-            lineChars[lineCharCount].unicode = ch;
-            lineChars[lineCharCount].x = x;
-            lineChars[lineCharCount].width = charW;
-            lineCharCount++;
-        }
-        x += charW;
-        currentLineWidth += charW;
-        bufPos += charPos;
-    }
-    if (lineCharCount > 0 && y < SCREEN_HEIGHT - _layout.marginBottom - lineHeight) {
-        drawLineChars(lineChars, lineCharCount, y, lineHeight, currentLineWidth, isParagraphStart);
-    }
+    // Keep rendering and pagination logic identical. The preload buffer remains
+    // useful for SD warm-up, but line breaking now depends on punctuation/word
+    // rules and page-start paragraph state, so the canonical file-backed path is safer.
+    drawTextPage();
 }
 
 void EbookReader::drawTextPage() {
     if (!isOpen()) return;
-    auto& display = M5.Display;
     PageInfo& page = _pages[_currentPage];
-    uint16_t x = _layout.marginLeft;
+    invalidateReadCursor();
     uint16_t y = _layout.marginTop;
-    _file.seek(page.startOffset);
-    uint32_t offset = page.startOffset;
-    uint16_t contentW = _layout.contentWidth();
     uint16_t lineHeight = _layout.calcLineHeight();
-    bool isGrayFont = (_font.getFontType() == FontType::GRAY_4BPP);
-    uint16_t currentLineWidth = 0;
-    bool isParagraphStart = true;
-    uint16_t indentPixels = _layout.indentFirstLine * _layout.fontSize;
+    uint32_t offset = page.startOffset;
+    bool paragraphStart = page.startsParagraph;
     LineChar lineChars[256];
-    uint8_t lineCharCount = 0;
+
     while (offset < page.endOffset && y < SCREEN_HEIGHT - _layout.marginBottom - lineHeight) {
-        uint8_t buf[6];
-        int readLen = _file.read(buf, 1);
-        if (readLen <= 0) break;
-        size_t pos = 0;
-        uint32_t ch = decodeUTF8(buf, pos, 1);
-        int needMore = 0;
-        if ((buf[0] & 0xE0) == 0xC0) needMore = 1;
-        else if ((buf[0] & 0xF0) == 0xE0) needMore = 2;
-        else if ((buf[0] & 0xF8) == 0xF0) needMore = 3;
-        if (needMore > 0) {
-            _file.read(buf + 1, needMore);
-            pos = 0;
-            ch = decodeUTF8(buf, pos, needMore + 1);
+        uint32_t nextOffset = offset;
+        uint8_t lineCharCount = 0;
+        uint16_t lineWidth = 0;
+        bool paragraphEnded = false;
+        bool hasLine = layoutNextLine(offset, page.endOffset, lineChars, 255, lineCharCount, lineWidth,
+                                      nextOffset, paragraphStart, paragraphEnded);
+        if (!hasLine && nextOffset <= offset) break;
+
+        bool allowJustify = !paragraphStart && !paragraphEnded && nextOffset < page.endOffset;
+        if (lineCharCount > 0) {
+            drawLineChars(lineChars, lineCharCount, y, lineHeight, lineWidth, paragraphStart, allowJustify);
         }
-        if (ch == '\n') {
-            if (lineCharCount > 0) {
-                drawLineChars(lineChars, lineCharCount, y, lineHeight, currentLineWidth, isParagraphStart);
-            }
-            y += lineHeight;
-            x = _layout.marginLeft;
-            currentLineWidth = 0;
-            lineCharCount = 0;
-            isParagraphStart = true;
-            offset += pos;
-            continue;
+        y += lineHeight;
+        if (nextOffset <= offset) nextOffset = offset + 1;
+        offset = nextOffset;
+        paragraphStart = paragraphEnded;
+
+        // Long SD/font render loops should still feed M5Unified so queued touch
+        // state is not stale when the page finally appears.
+        if (((y - _layout.marginTop) / lineHeight) % 4 == 0) {
+            M5.update();
+            yield();
         }
-        if (ch == '\r') {
-            offset += pos;
-            continue;
-        }
-        uint8_t charW = _font.getCharAdvance(ch);
-        uint16_t lineStartX = isParagraphStart ? indentPixels : 0;
-        if (currentLineWidth > 0 && currentLineWidth + charW + lineStartX > contentW) {
-            if (lineCharCount > 0) {
-                drawLineChars(lineChars, lineCharCount, y, lineHeight, currentLineWidth, isParagraphStart);
-            }
-            y += lineHeight;
-            x = _layout.marginLeft;
-            currentLineWidth = 0;
-            lineCharCount = 0;
-            isParagraphStart = false;
-            if (y > SCREEN_HEIGHT - _layout.marginBottom - lineHeight) break;
-        }
-        if (lineCharCount < 255) {
-            lineChars[lineCharCount].unicode = ch;
-            lineChars[lineCharCount].x = x;
-            lineChars[lineCharCount].width = charW;
-            lineCharCount++;
-        }
-        x += charW;
-        currentLineWidth += charW;
-        offset += pos;
-    }
-    if (lineCharCount > 0 && y < SCREEN_HEIGHT - _layout.marginBottom - lineHeight) {
-        drawLineChars(lineChars, lineCharCount, y, lineHeight, currentLineWidth, isParagraphStart);
     }
 }
 
-void EbookReader::drawLineChars(LineChar* chars, uint8_t count, uint16_t y, 
-                                 uint16_t lineHeight, uint16_t lineWidth, bool isParagraphStart) {
-    auto& display = M5.Display;
+void EbookReader::drawLineChars(LineChar* chars, uint8_t count, uint16_t y,
+                                 uint16_t lineHeight, uint16_t lineWidth, bool isParagraphStart, bool allowJustify) {
     bool isGrayFont = (_font.getFontType() == FontType::GRAY_4BPP);
     uint16_t startX = _layout.marginLeft;
     if (isParagraphStart && _layout.indentFirstLine > 0) {
         startX += _layout.indentFirstLine * _layout.fontSize;
     }
     int16_t extraSpace = 0;
-    if (_layout.justify && count > 1 && !isParagraphStart) {
+    if (_layout.justify && allowJustify && count > 1) {
         uint16_t contentW = _layout.contentWidth();
-        if (lineWidth < contentW - 10) {
-            extraSpace = (contentW - lineWidth) / (count - 1);
+        uint16_t indentPixels = isParagraphStart ? _layout.indentFirstLine * _layout.fontSize : 0;
+        uint16_t availableW = indentPixels < contentW ? contentW - indentPixels : contentW;
+        if (lineWidth < availableW - 10) {
+            // Spread mostly at natural gaps first; never explode CJK glyph spacing.
+            uint8_t gaps = 0;
+            for (uint8_t i = 0; i + 1 < count; ++i) {
+                if (isBreakableAfter(chars[i].unicode)) gaps++;
+            }
+            if (gaps == 0) gaps = min<uint8_t>(count - 1, 8);
+            extraSpace = min<int16_t>(6, (availableW - lineWidth) / gaps);
         }
     }
     uint16_t x = startX;
     for (int i = 0; i < count; i++) {
-        if (isGrayFont) {
-            drawGrayChar(chars[i].unicode, x, y);
-        } else {
-            drawBitmapChar(chars[i].unicode, x, y);
+        if (!isWhitespace(chars[i].unicode)) {
+            if (isGrayFont) {
+                drawGrayChar(chars[i].unicode, x, y);
+            } else {
+                drawBitmapChar(chars[i].unicode, x, y);
+            }
         }
-        x += chars[i].width + extraSpace;
+        x += chars[i].width;
+        if (extraSpace > 0 && i + 1 < count && (isBreakableAfter(chars[i].unicode) || extraSpace <= 2)) {
+            x += extraSpace;
+        }
     }
 }
 
 void EbookReader::drawBitmapChar(uint32_t unicode, uint16_t x, uint16_t y) {
-    auto& display = M5.Display;
+    auto& display = drawTarget();
     uint8_t bw, bh;
     const uint8_t* bitmap = _font.getCharBitmap(unicode, bw, bh);
     if (!bitmap || bw == 0 || bh == 0) return;
@@ -725,7 +1022,7 @@ void EbookReader::drawBitmapChar(uint32_t unicode, uint16_t x, uint16_t y) {
 }
 
 void EbookReader::drawGrayChar(uint32_t unicode, uint16_t x, uint16_t y) {
-    auto& display = M5.Display;
+    auto& display = drawTarget();
     uint8_t width, height, advance;
     int8_t bearingX, bearingY;
     const uint8_t* grayBitmap = _font.getCharBitmapGray(unicode, width, height, bearingX, bearingY, advance);
@@ -750,7 +1047,7 @@ void EbookReader::drawGrayChar(uint32_t unicode, uint16_t x, uint16_t y) {
 }
 
 void EbookReader::drawStatusBar() {
-    auto& display = M5.Display;
+    auto& display = drawTarget();
     int barY = SCREEN_HEIGHT - 4;
     display.drawRect(0, barY, SCREEN_WIDTH, 4, 0);
     if (_totalPages > 0) {
