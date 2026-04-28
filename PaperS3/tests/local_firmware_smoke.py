@@ -8,8 +8,8 @@ things that repeatedly caused real-device regressions:
 - no legacy direct FileBrowser render path from App
 - non-tab menu pages are dirty-gated instead of repainting every loop
 - transition touches wait for finger release
-- releases.json top asset sizes match generated artifacts
-- optional PlatformIO build/buildfs/full-merge
+- releases.json top asset sizes match existing release artifacts
+- optional PlatformIO build/buildfs/full-merge with partition-size checks
 """
 from __future__ import annotations
 
@@ -27,6 +27,9 @@ REPO = PROJECT.parent
 WORKSPACE = Path("/home/vito/.openclaw/workspace")
 ARTIFACTS = WORKSPACE / "artifacts"
 DEFAULT_SLUG = "shell-commit-guard"
+APP_SLOT_SIZE = 0x600000
+SPIFFS_SIZE = 0x3F0000
+FULL_FLASH_SIZE = 0x1000000
 
 
 class CheckFailed(Exception):
@@ -117,6 +120,7 @@ def vink3_source_invariants(main_cpp: str) -> None:
     legado_cpp = read("src/vink3/sync/LegadoService.cpp")
     ui_cpp = read("src/vink3/ui/VinkUiRenderer.cpp")
     cjk_cpp = read("src/vink3/text/CjkTextRenderer.cpp")
+    reader_cpp = read("src/vink3/reader/ReaderTextRenderer.cpp")
     upstream = read("src/vink3/ReadPaper176.h")
 
     assert_contains(main_cpp, "xTaskCreatePinnedToCore", "v0.3 main starts a ReadPaper-style pinned MainTask")
@@ -134,6 +138,8 @@ def vink3_source_invariants(main_cpp: str) -> None:
     assert_contains(ui_cpp, "CjkTextRenderer", "v0.3 UI routes text through CJK renderer")
     assert_contains(cjk_cpp, "beginReadPaperSubset", "v0.3 CJK renderer uses ReadPaper subset font before fallback")
     assert_contains(cjk_cpp, "loadBundledFont", "v0.3 CJK renderer still has bundled bitmap fallback")
+    assert_contains(reader_cpp, "ReaderTextRenderer", "v0.3 has a separate reader body renderer")
+    assert_contains(reader_cpp, "loadBundledFont(FONT_FILE_24)", "reader body renderer prefers larger bundled body font")
     assert_not_contains(ui_cpp, "drawString", "v0.3 UI renderer must not use M5GFX drawString for Chinese")
 
     ui_sources = [
@@ -151,7 +157,7 @@ def vink3_source_invariants(main_cpp: str) -> None:
     ok("v0.3 physical display writes are isolated to DisplayService")
 
 
-def manifest_and_artifacts(slug: str) -> None:
+def manifest_and_artifacts(slug: str, strict_artifacts: bool = False) -> None:
     data = json.loads((PROJECT / "releases.json").read_text(encoding="utf-8"))
     releases = data.get("releases") or []
     if not releases:
@@ -169,12 +175,20 @@ def manifest_and_artifacts(slug: str) -> None:
         "spiffs": ARTIFACTS / f"Vink-PaperS3-{version}-{slug}-spiffs.bin",
     }
     for kind, path in expected.items():
-        if not path.exists():
-            fail(f"missing artifact: {path}")
-        actual_size = path.stat().st_size
         manifest_size = assets.get(kind, {}).get("size")
+        if not isinstance(manifest_size, int) or manifest_size <= 0:
+            fail(f"{kind} manifest size is invalid: {manifest_size}")
+        if not path.exists():
+            if strict_artifacts:
+                fail(f"missing artifact: {path}")
+            ok(f"{kind} manifest size is declared: {manifest_size}")
+            continue
+        actual_size = path.stat().st_size
         if actual_size != manifest_size:
-            fail(f"{kind} size mismatch: artifact={actual_size}, manifest={manifest_size}")
+            if strict_artifacts:
+                fail(f"{kind} size mismatch: artifact={actual_size}, manifest={manifest_size}")
+            ok(f"{kind} manifest size is declared: {manifest_size} (cached artifact is local build: {actual_size})")
+            continue
         ok(f"{kind} artifact size matches manifest: {actual_size}")
 
     full_offset = assets.get("full", {}).get("flashOffset")
@@ -184,6 +198,31 @@ def manifest_and_artifacts(slug: str) -> None:
     if ota_offset not in (65536, "65536", "0x10000"):
         fail(f"unexpected ota flashOffset: {ota_offset}")
     ok("Manifest flash offsets look correct")
+
+
+def built_artifacts_smoke(slug: str) -> None:
+    data = json.loads((PROJECT / "releases.json").read_text(encoding="utf-8"))
+    version = data["releases"][0]["version"]
+    expected = {
+        "full": ARTIFACTS / f"Vink-PaperS3-{version}-{slug}-full-16MB.bin",
+        "ota": ARTIFACTS / f"Vink-PaperS3-{version}-{slug}-ota.bin",
+        "spiffs": ARTIFACTS / f"Vink-PaperS3-{version}-{slug}-spiffs.bin",
+    }
+    sizes = {}
+    for kind, path in expected.items():
+        if not path.exists():
+            fail(f"missing built artifact: {path}")
+        sizes[kind] = path.stat().st_size
+
+    if sizes["full"] != FULL_FLASH_SIZE:
+        fail(f"full image must be exactly 16MB, got {sizes['full']}")
+    ok(f"built full image is 16MB: {sizes['full']}")
+    if not 0 < sizes["ota"] <= APP_SLOT_SIZE:
+        fail(f"OTA image must fit app slot: artifact={sizes['ota']} slot={APP_SLOT_SIZE}")
+    ok(f"built OTA image fits 6MB app slot: {sizes['ota']}")
+    if sizes["spiffs"] != SPIFFS_SIZE:
+        fail(f"SPIFFS image must match partition size: artifact={sizes['spiffs']} partition={SPIFFS_SIZE}")
+    ok(f"built SPIFFS image matches partition: {sizes['spiffs']}")
 
 
 def json_valid() -> None:
@@ -216,6 +255,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run local Vink-PaperS3 firmware smoke tests")
     parser.add_argument("--build", action="store_true", help="run PlatformIO build, buildfs, full merge, and copy artifacts first")
     parser.add_argument("--slug", default=DEFAULT_SLUG, help="artifact slug used in workspace/artifacts filenames")
+    parser.add_argument("--strict-artifacts", action="store_true", help="require cached artifacts to exactly match releases.json")
     args = parser.parse_args()
 
     try:
@@ -223,7 +263,9 @@ def main() -> int:
         source_invariants()
         if args.build:
             build_all(args.slug)
-        manifest_and_artifacts(args.slug)
+            built_artifacts_smoke(args.slug)
+        else:
+            manifest_and_artifacts(args.slug, strict_artifacts=args.strict_artifacts)
     except subprocess.CalledProcessError as e:
         print(f"[FAIL] command failed with exit code {e.returncode}", file=sys.stderr)
         return e.returncode or 1

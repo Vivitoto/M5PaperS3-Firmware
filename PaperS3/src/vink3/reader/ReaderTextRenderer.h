@@ -1,0 +1,44 @@
+#pragma once
+#include <Arduino.h>
+#include <M5Unified.h>
+#include "../../FontManager.h"
+
+namespace vink3 {
+
+struct ReaderRenderOptions {
+    uint8_t fontSize = 24;
+    int16_t marginLeft = 34;
+    int16_t marginTop = 86;
+    int16_t marginRight = 30;
+    int16_t marginBottom = 46;
+    int16_t lineGap = 12;
+    bool vertical = false;
+    bool dark = false;
+};
+
+class ReaderTextRenderer {
+public:
+    bool begin(M5Canvas* canvas);
+    bool loadDefaultFont();
+    bool loadFont(const char* path);
+    bool ready() const;
+    uint16_t fontSize() const;
+
+    void renderPlaceholderPage();
+    void renderTextPage(const char* title, const char* body, uint16_t page, uint16_t totalPages, const ReaderRenderOptions& options = ReaderRenderOptions{});
+
+private:
+    static uint32_t decodeUtf8(const uint8_t* buf, size_t& pos, size_t len);
+    uint8_t charAdvance(uint32_t unicode) const;
+    int16_t textWidth(const char* text) const;
+    void drawGlyph(uint32_t unicode, int16_t x, int16_t y, uint16_t color);
+    void drawText(int16_t x, int16_t y, const char* text, uint16_t color = TFT_BLACK);
+    size_t findWrapBreak(const char* text, size_t start, int16_t maxWidth) const;
+
+    M5Canvas* canvas_ = nullptr;
+    FontManager font_;
+};
+
+extern ReaderTextRenderer g_readerText;
+
+} // namespace vink3
