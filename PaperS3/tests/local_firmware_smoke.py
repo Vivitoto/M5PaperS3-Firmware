@@ -27,7 +27,7 @@ REPO = PROJECT.parent
 WORKSPACE = Path("/home/vito/.openclaw/workspace")
 ARTIFACTS = WORKSPACE / "artifacts"
 DEFAULT_SLUG = "shell-commit-guard"
-APP_SLOT_SIZE = 0x600000
+APP_SLOT_SIZE = 0xC00000  # v0.3 single-app layout for full ReadPaper PROGMEM font
 SPIFFS_SIZE = 0x3F0000
 FULL_FLASH_SIZE = 0x1000000
 
@@ -249,7 +249,7 @@ def built_artifacts_smoke(slug: str) -> None:
     ok(f"built full image is 16MB: {sizes['full']}")
     if not 0 < sizes["ota"] <= APP_SLOT_SIZE:
         fail(f"OTA image must fit app slot: artifact={sizes['ota']} slot={APP_SLOT_SIZE}")
-    ok(f"built OTA image fits 6MB app slot: {sizes['ota']}")
+    ok(f"built OTA image fits app slot: {sizes['ota']} <= {APP_SLOT_SIZE}")
     if sizes["spiffs"] != SPIFFS_SIZE:
         fail(f"SPIFFS image must match partition size: artifact={sizes['spiffs']} partition={SPIFFS_SIZE}")
     ok(f"built SPIFFS image matches partition: {sizes['spiffs']}")
