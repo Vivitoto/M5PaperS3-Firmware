@@ -26,6 +26,9 @@ void renderState(SystemState state) {
         case SystemState::Reader:
             g_uiRenderer.renderReaderHome();
             break;
+        case SystemState::ReaderMenu:
+            g_readerBook.renderCurrent();
+            break;
         case SystemState::Library:
             g_uiRenderer.renderLibrary();
             break;
@@ -137,13 +140,18 @@ void StateMachine::handle(const Message& message) {
                 }
 
                 case UiAction::OpenCurrentBook:
-                    state_ = SystemState::Reader;
+                    state_ = SystemState::ReaderMenu;
                     g_readerBook.renderOpenOrHelp();
                     g_displayService.enqueueFull(false, 100);
                     break;
 
-                case UiAction::BackHome:
                 case UiAction::None:
+                    if (state_ == SystemState::ReaderMenu && g_readerBook.handleTap(message.touch.x, message.touch.y)) {
+                        g_displayService.enqueueFull(false, 100);
+                    }
+                    break;
+
+                case UiAction::BackHome:
                 default:
                     break;
             }
@@ -151,6 +159,10 @@ void StateMachine::handle(const Message& message) {
         }
 
         case MessageType::SwipeLeft:
+            if (state_ == SystemState::ReaderMenu) {
+                if (g_readerBook.nextTocPage()) g_displayService.enqueueFull(false, 100);
+                break;
+            }
             if (state_ == SystemState::Reader) state_ = SystemState::Library;
             else if (state_ == SystemState::Library) state_ = SystemState::Transfer;
             else if (state_ == SystemState::Transfer) state_ = SystemState::Settings;
@@ -159,11 +171,27 @@ void StateMachine::handle(const Message& message) {
             break;
 
         case MessageType::SwipeRight:
+            if (state_ == SystemState::ReaderMenu) {
+                if (g_readerBook.prevTocPage()) g_displayService.enqueueFull(false, 100);
+                break;
+            }
             if (state_ == SystemState::Settings) state_ = SystemState::Transfer;
             else if (state_ == SystemState::Transfer) state_ = SystemState::Library;
             else if (state_ == SystemState::Library) state_ = SystemState::Reader;
             renderState(state_);
             g_displayService.enqueueFull(false, 100);
+            break;
+
+        case MessageType::SwipeUp:
+            if (state_ == SystemState::ReaderMenu && g_readerBook.nextTocPage()) {
+                g_displayService.enqueueFull(false, 100);
+            }
+            break;
+
+        case MessageType::SwipeDown:
+            if (state_ == SystemState::ReaderMenu && g_readerBook.prevTocPage()) {
+                g_displayService.enqueueFull(false, 100);
+            }
             break;
 
         case MessageType::LegadoSyncStart:
