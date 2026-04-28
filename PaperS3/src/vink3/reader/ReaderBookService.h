@@ -43,6 +43,7 @@ private:
     void getPageCachePath(char* out, size_t len) const;
     bool loadTocCache();
     void saveTocCache();
+    uint32_t activeTextSize() const;
     bool loadProgress();
     void saveProgress();
     bool loadChapterPageCache(int index, uint32_t start, uint32_t end);
