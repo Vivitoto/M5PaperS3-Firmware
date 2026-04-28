@@ -14,6 +14,9 @@ constexpr int16_t kContentY = 160;
 constexpr int16_t kTabW = 120;
 constexpr int16_t kTabGap = 8;
 constexpr int16_t kTabX0 = 18;
+constexpr uint16_t kGrayLight = 0xEF7D; // ~#EFEFEF
+constexpr uint16_t kGrayMid = 0xD69A;   // ~#D6D6D6
+constexpr uint16_t kGrayText = 0x8410;  // ~#888888
 
 struct TabDef {
     SystemState state;
@@ -22,10 +25,10 @@ struct TabDef {
 };
 
 constexpr TabDef kTabs[] = {
-    {SystemState::Reader, UiAction::TabReader, "Read"},
-    {SystemState::Library, UiAction::TabLibrary, "Shelf"},
-    {SystemState::Transfer, UiAction::TabTransfer, "Sync"},
-    {SystemState::Settings, UiAction::TabSettings, "Set"},
+    {SystemState::Reader, UiAction::TabReader, "阅读"},
+    {SystemState::Library, UiAction::TabLibrary, "书架"},
+    {SystemState::Transfer, UiAction::TabTransfer, "同步"},
+    {SystemState::Settings, UiAction::TabSettings, "设置"},
 };
 
 bool inRect(int16_t x, int16_t y, int16_t rx, int16_t ry, int16_t rw, int16_t rh) {
@@ -65,8 +68,10 @@ void VinkUiRenderer::drawTabs(SystemState active) {
             canvas_->fillRoundRect(x, kTabsY, kTabW, kTabsH, 16, TFT_BLACK);
             canvas_->setTextColor(TFT_WHITE, TFT_BLACK);
         } else {
+            const uint16_t fill = (i % 2 == 0) ? kGrayMid : kGrayLight;
+            canvas_->fillRoundRect(x, kTabsY, kTabW, kTabsH, 16, fill);
             canvas_->drawRoundRect(x, kTabsY, kTabW, kTabsH, 16, TFT_BLACK);
-            canvas_->setTextColor(TFT_BLACK, TFT_WHITE);
+            canvas_->setTextColor(TFT_BLACK, fill);
         }
         canvas_->setTextDatum(middle_center);
         canvas_->drawString(kTabs[i].label, x + kTabW / 2, kTabsY + kTabsH / 2);
@@ -75,13 +80,17 @@ void VinkUiRenderer::drawTabs(SystemState active) {
 }
 
 void VinkUiRenderer::drawCard(int16_t x, int16_t y, int16_t w, int16_t h, const char* title, const char* body) {
+    const uint16_t fill = ((y / 100) % 2 == 0) ? kGrayLight : kGrayMid;
+    canvas_->fillRoundRect(x, y, w, h, 18, fill);
     canvas_->drawRoundRect(x, y, w, h, 18, TFT_BLACK);
     canvas_->setTextDatum(top_left);
     canvas_->setTextSize(2);
     canvas_->drawString(title ? title : "", x + 22, y + 18);
     canvas_->setTextSize(1);
     if (body && body[0]) {
+        canvas_->setTextColor(kGrayText, fill);
         canvas_->drawString(body, x + 22, y + 58);
+        canvas_->setTextColor(TFT_BLACK, TFT_WHITE);
     }
 }
 
@@ -95,7 +104,9 @@ void VinkUiRenderer::drawButton(int16_t x, int16_t y, int16_t w, int16_t h, cons
 void VinkUiRenderer::drawFooterHint(const char* hint) {
     canvas_->setTextDatum(middle_center);
     canvas_->setTextSize(1);
-    canvas_->drawString(hint ? hint : "Tap tab or card", kPaperS3Width / 2, kPaperS3Height - 28);
+    canvas_->setTextColor(kGrayText, TFT_WHITE);
+    canvas_->drawString(hint ? hint : "点击标签或卡片", kPaperS3Width / 2, kPaperS3Height - 28);
+    canvas_->setTextColor(TFT_BLACK, TFT_WHITE);
 }
 
 void VinkUiRenderer::renderBoot() {
@@ -105,7 +116,7 @@ void VinkUiRenderer::renderBoot() {
     canvas_->setTextSize(3);
     canvas_->drawString("Vink", 270, 410);
     canvas_->setTextSize(1);
-    canvas_->drawString("v0.3.0 / ReadPaper V1.7.6 core", 270, 470);
+    canvas_->drawString("v0.3.0 · ReadPaper V1.7.6 底层", 270, 470);
 }
 
 void VinkUiRenderer::renderHome(SystemState state) {
@@ -116,71 +127,72 @@ void VinkUiRenderer::renderHome(SystemState state) {
 void VinkUiRenderer::renderReaderHome() {
     if (!canvas_) return;
     clear();
-    drawStatusBar("Vink Reader");
+    drawStatusBar("Vink 阅读");
     drawTabs(SystemState::Reader);
-    drawCard(28, kContentY, 484, 180, "Current book", "Resume / prev / next / center menu");
-    drawButton(56, 292, 180, 44, "Open");
-    drawButton(304, 292, 180, 44, "Library");
-    drawCard(28, 370, 224, 132, "TOC", "Chapters / goto page");
-    drawCard(288, 370, 224, 132, "Marks", "Bookmark / screenshot");
-    drawCard(28, 532, 484, 220, "Reading settings", "Auto-read, refresh, font scale, vertical, zh");
-    drawFooterHint("Reader: current-book settings stay near the text");
+    drawCard(28, kContentY, 484, 180, "当前书籍", "继续阅读 / 上一页 / 下一页 / 中心菜单");
+    drawButton(56, 292, 180, 44, "打开");
+    drawButton(304, 292, 180, 44, "书架");
+    drawCard(28, 370, 224, 132, "目录", "章节 / 跳页");
+    drawCard(288, 370, 224, 132, "标注", "书签 / 截图");
+    drawCard(28, 532, 484, 220, "正文设置", "自动翻页 / 刷新 / 字号 / 竖排 / 繁简");
+    drawFooterHint("当前书设置留在正文页，设置页只管默认值");
 }
 
 void VinkUiRenderer::renderLibrary() {
     if (!canvas_) return;
     clear();
-    drawStatusBar("Library");
+    drawStatusBar("书架");
     drawTabs(SystemState::Library);
     for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 3; ++col) {
             const int16_t x = 34 + col * 164;
             const int16_t y = kContentY + row * 150;
+            canvas_->fillRoundRect(x, y, 130, 118, 12, (row + col) % 2 == 0 ? kGrayMid : kGrayLight);
             canvas_->drawRoundRect(x, y, 130, 118, 12, TFT_BLACK);
             canvas_->setTextDatum(middle_center);
             canvas_->setTextSize(1);
-            canvas_->drawString("Book", x + 65, y + 59);
+            canvas_->drawString("书籍", x + 65, y + 59);
         }
     }
-    drawCard(28, 648, 484, 132, "Sources", "SD folders / recent / Legado bookshelf");
-    drawFooterHint("Library: local shelf, recent history, remote shelf pairing");
+    drawCard(28, 648, 484, 132, "书架来源", "SD / 最近阅读 / Legado 远程书架");
+    drawFooterHint("选书、目录导航、最近记录和远程书架");
 }
 
 void VinkUiRenderer::renderTransfer() {
     if (!canvas_) return;
     clear();
-    drawStatusBar("Transfer & Sync");
+    drawStatusBar("传输与同步");
     drawTabs(SystemState::Transfer);
-    drawCard(28, kContentY, 484, 150, "Legado", "HTTP web service: bookshelf + progress");
-    drawButton(56, 268, 180, 48, "Sync now");
-    drawButton(304, 268, 180, 48, "Config");
-    drawCard(28, 360, 224, 132, "WiFi", "Upload / web UI");
-    drawCard(288, 360, 224, 132, "USB", "MSC confirm state");
-    drawCard(28, 524, 484, 170, "WebDAV / Export", "ReadPaper transfer tools live here");
-    drawFooterHint("Transfer: Legado is separate from WebDAV");
+    drawCard(28, kContentY, 484, 150, "Legado", "HTTP 服务：书架 / 进度同步");
+    drawButton(56, 268, 180, 48, "立即同步");
+    drawButton(304, 268, 180, 48, "配置");
+    drawCard(28, 360, 224, 132, "WiFi 传书", "热点 / Web UI");
+    drawCard(288, 360, 224, 132, "USB 存储", "确认后接管 SD");
+    drawCard(28, 524, 484, 170, "WebDAV / 导出", "ReadPaper 传输工具");
+    drawFooterHint("Legado 不是 WebDAV；默认 1122，可配置");
 }
 
 void VinkUiRenderer::renderSettings() {
     if (!canvas_) return;
     clear();
-    drawStatusBar("Settings");
+    drawStatusBar("设置");
     drawTabs(SystemState::Settings);
-    drawCard(28, kContentY, 484, 132, "Display", "Refresh, dark, rotation, quality");
-    drawCard(28, 318, 484, 132, "Reading defaults", "Default font, scale, vertical, zh convert");
-    drawCard(28, 476, 484, 132, "Network", "WiFi, WebDAV, Legado endpoint");
-    drawCard(28, 634, 484, 132, "System", "Battery, sleep, version, debug");
-    drawFooterHint("Settings: persistent ReadPaper/Vink config");
+    drawCard(28, kContentY, 484, 132, "显示默认", "刷新策略 / 深色 / 旋转 / 质量");
+    drawCard(28, 318, 484, 132, "阅读默认", "默认字体 / 默认字号 / 默认横竖排");
+    drawCard(28, 476, 484, 132, "网络", "WiFi / WebDAV / Legado 地址");
+    drawCard(28, 634, 484, 132, "系统", "电池 / 睡眠 / 版本 / 调试");
+    drawFooterHint("全局默认放这里；正文临场设置放阅读页");
 }
 
 void VinkUiRenderer::renderLegadoSync(const char* status) {
     if (!canvas_) return;
     clear();
-    drawStatusBar("Legado Sync");
+    drawStatusBar("Legado 同步");
     drawTabs(SystemState::Transfer);
-    drawCard(28, kContentY, 484, 160, "Legado", status ? status : "Waiting");
-    drawButton(56, 346, 180, 48, "Back");
-    drawButton(304, 346, 180, 48, "Retry");
-    drawFooterHint("Service screen; HTTP sync comes after reader core");
+    drawCard(28, kContentY, 484, 160, "Legado", status ? status : "等待同步");
+    drawButton(56, 346, 180, 48, "返回");
+    drawButton(304, 346, 180, 48, "重试");
+    drawFooterHint("冲突不自动覆盖，不确定就让用户选");
 }
 
 UiAction VinkUiRenderer::hitTestTabs(int16_t x, int16_t y) const {
