@@ -92,10 +92,42 @@ bool ReaderBookService::scanBooks() {
         f = dir.openNextFile();
     }
     dir.close();
+    sortBooks();
     booksScanned_ = true;
     if (bookPage_ * kBooksPerPage >= bookCount_) bookPage_ = 0;
     Serial.printf("[vink3][book] library scan: %d TXT books\n", bookCount_);
     return true;
+}
+
+void ReaderBookService::sortBooks() {
+    if (bookCount_ <= 1 || !bookPaths_ || !bookTitles_ || !bookFlags_) return;
+    // SD directory iteration order can vary by card/write history. Keep the
+    // bookshelf stable across boots by sorting on the visible title/path.
+    for (int i = 1; i < bookCount_; ++i) {
+        int j = i;
+        while (j > 0) {
+            int cmp = strcmp(bookTitles_[j - 1], bookTitles_[j]);
+            if (cmp == 0) cmp = strcmp(bookPaths_[j - 1], bookPaths_[j]);
+            if (cmp <= 0) break;
+            swapBookEntries(j - 1, j);
+            --j;
+        }
+    }
+}
+
+void ReaderBookService::swapBookEntries(int a, int b) {
+    if (a == b || a < 0 || b < 0 || a >= bookCount_ || b >= bookCount_) return;
+    char pathTmp[160];
+    char titleTmp[72];
+    strlcpy(pathTmp, bookPaths_[a], sizeof(pathTmp));
+    strlcpy(titleTmp, bookTitles_[a], sizeof(titleTmp));
+    uint8_t flagsTmp = bookFlags_[a];
+    strlcpy(bookPaths_[a], bookPaths_[b], sizeof(bookPaths_[a]));
+    strlcpy(bookTitles_[a], bookTitles_[b], sizeof(bookTitles_[a]));
+    bookFlags_[a] = bookFlags_[b];
+    strlcpy(bookPaths_[b], pathTmp, sizeof(bookPaths_[b]));
+    strlcpy(bookTitles_[b], titleTmp, sizeof(bookTitles_[b]));
+    bookFlags_[b] = flagsTmp;
 }
 
 void ReaderBookService::closeCurrent() {
@@ -153,6 +185,36 @@ uint8_t ReaderBookService::detectBookFlags(const char* bookPath) const {
     getSidecarPathForBook(sidecar, sizeof(sidecar), bookPath, ".vink-pages");
     if (sidecar[0] && SD.exists(sidecar)) flags |= kBookHasPageCache;
     return flags;
+}
+
+uint32_t ReaderBookService::bookFileSize(const char* bookPath) const {
+    if (!bookPath || !bookPath[0]) return 0;
+    File f = SD.open(bookPath, FILE_READ);
+    if (!f) return 0;
+    uint32_t size = f.size();
+    f.close();
+    return size;
+}
+
+void ReaderBookService::formatBytes(uint32_t bytes, char* out, size_t len) const {
+    if (!out || len == 0) return;
+    if (bytes >= 1024UL * 1024UL) {
+        snprintf(out, len, "%lu.%lu MB", static_cast<unsigned long>(bytes / (1024UL * 1024UL)),
+                 static_cast<unsigned long>((bytes % (1024UL * 1024UL)) * 10UL / (1024UL * 1024UL)));
+    } else if (bytes >= 1024UL) {
+        snprintf(out, len, "%lu.%lu KB", static_cast<unsigned long>(bytes / 1024UL),
+                 static_cast<unsigned long>((bytes % 1024UL) * 10UL / 1024UL));
+    } else {
+        snprintf(out, len, "%lu B", static_cast<unsigned long>(bytes));
+    }
+}
+
+void ReaderBookService::formatBookFlags(uint8_t flags, char* out, size_t len) const {
+    if (!out || len == 0) return;
+    snprintf(out, len, "%s%s%s",
+             (flags & kBookHasProgress) ? "读" : "-",
+             (flags & kBookHasTocCache) ? "目" : "-",
+             (flags & kBookHasPageCache) ? "页" : "-");
 }
 
 void ReaderBookService::getTocCachePath(char* out, size_t len) const {
@@ -406,10 +468,7 @@ void ReaderBookService::renderLibraryPage(uint16_t page) {
         strlcpy(titleBuf, bookTitles_[i], sizeof(titleBuf));
         trimUtf8Tail(titleBuf, strlen(titleBuf));
         char flags[16];
-        snprintf(flags, sizeof(flags), "%s%s%s",
-                 (bookFlags_[i] & kBookHasProgress) ? "读" : "-",
-                 (bookFlags_[i] & kBookHasTocCache) ? "目" : "-",
-                 (bookFlags_[i] & kBookHasPageCache) ? "页" : "-");
+        formatBookFlags(bookFlags_[i], flags, sizeof(flags));
         used += snprintf(body + used, sizeof(body) - used, "%c%03d [%s] %s\n", current ? '*' : ' ', i + 1, flags, titleBuf);
     }
     g_readerText.renderTextPage("书架", body, bookPage_ + 1, totalPages);
@@ -472,7 +531,12 @@ void ReaderBookService::renderBookEntryPage() {
     }
     char body[900];
     char progress[160];
+    char sizeText[24];
+    char flags[16];
     const char* chapterTitle = (currentTocIndex_ >= 0 && currentTocIndex_ < tocCount_) ? toc_[currentTocIndex_].title.c_str() : "尚未开始";
+    const uint8_t cacheFlags = detectBookFlags(bookPath_);
+    formatBytes(bookFileSize(bookPath_), sizeText, sizeof(sizeText));
+    formatBookFlags(cacheFlags, flags, sizeof(flags));
     if (hasProgress_) {
         snprintf(progress, sizeof(progress), "%s · 第 %d 页", chapterTitle, currentPage_ + 1);
     } else {
@@ -480,12 +544,18 @@ void ReaderBookService::renderBookEntryPage() {
     }
     snprintf(body, sizeof(body),
              "书籍：%s\n"
+             "大小：%s\n"
+             "目录：%d 条\n"
+             "缓存：[%s] 读/目/页=进度/目录/页表\n"
              "进度：%s\n\n"
              "继续阅读\n"
              "目录\n"
              "从头开始\n\n"
              "提示：点选操作；阅读中左右/上下滑动翻页。",
              title_,
+             sizeText,
+             tocCount_,
+             flags,
              progress);
     g_readerText.renderTextPage("书籍入口", body, 1, 1);
 }

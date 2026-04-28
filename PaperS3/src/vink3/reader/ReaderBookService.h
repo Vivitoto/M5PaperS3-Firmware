@@ -48,12 +48,17 @@ private:
     bool ensureBookBuffers();
     bool ensureSdReady();
     bool scanBooks();
+    void sortBooks();
+    void swapBookEntries(int a, int b);
     bool isTxtPath(const char* name) const;
     void closeCurrent();
     void setTitleFromPath(const char* path);
     void getSidecarPath(char* out, size_t len, const char* suffix) const;
     void getSidecarPathForBook(char* out, size_t len, const char* bookPath, const char* suffix) const;
     uint8_t detectBookFlags(const char* bookPath) const;
+    uint32_t bookFileSize(const char* bookPath) const;
+    void formatBytes(uint32_t bytes, char* out, size_t len) const;
+    void formatBookFlags(uint8_t flags, char* out, size_t len) const;
     void getTocCachePath(char* out, size_t len) const;
     void getProgressPath(char* out, size_t len) const;
     void getPageCachePath(char* out, size_t len) const;
