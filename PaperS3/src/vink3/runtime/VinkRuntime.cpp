@@ -1,6 +1,7 @@
 #include "VinkRuntime.h"
 #include "../display/DisplayService.h"
 #include "../input/InputService.h"
+#include "../reader/ReaderBookService.h"
 #include "../reader/ReaderTextRenderer.h"
 #include "../state/StateMachine.h"
 #include "../sync/LegadoService.h"
@@ -79,6 +80,7 @@ bool VinkRuntime::beginCanvas() {
 bool VinkRuntime::beginServices() {
     if (!g_uiRenderer.begin(&canvas_)) return false;
     if (!g_readerText.begin(&canvas_)) return false;
+    if (!g_readerBook.begin()) return false;
     if (!g_displayService.begin(&canvas_)) return false;
     if (!g_stateMachine.begin()) return false;
     if (!g_inputService.begin(&g_stateMachine)) return false;

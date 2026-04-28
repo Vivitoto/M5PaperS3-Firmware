@@ -1,5 +1,6 @@
 #include "StateMachine.h"
 #include "../display/DisplayService.h"
+#include "../reader/ReaderBookService.h"
 #include "../reader/ReaderTextRenderer.h"
 #include "../sync/LegadoService.h"
 #include "../ui/VinkUiRenderer.h"
@@ -137,7 +138,7 @@ void StateMachine::handle(const Message& message) {
 
                 case UiAction::OpenCurrentBook:
                     state_ = SystemState::Reader;
-                    g_readerText.renderPlaceholderPage();
+                    g_readerBook.renderOpenOrHelp();
                     g_displayService.enqueueFull(false, 100);
                     break;
 
