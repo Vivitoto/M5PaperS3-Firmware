@@ -17,22 +17,25 @@ bool CjkTextRenderer::begin(M5Canvas* canvas) {
     canvas_ = canvas;
     if (!canvas_) return false;
 
+    // Vink UI must keep the Simplified Chinese SC visual style. ReadPaper is a
+    // low-level reference only; its UI subset can look like Traditional/Japanese
+    // glyphs on shared Han characters, so bundled SC UI fonts take priority.
+    if (font_.loadBundledFont(FONT_FILE_20)) {
+        Serial.println("[vink3][cjk] bundled SC 20px UI font loaded");
+        return true;
+    }
+    if (font_.loadBundledFont(FONT_FILE_16)) {
+        Serial.println("[vink3][cjk] bundled SC 16px UI font loaded");
+        return true;
+    }
+
     if (beginReadPaperSubset()) {
-        Serial.printf("[vink3][cjk] ReadPaper V3 UI subset loaded: glyphs=%lu size=%lu\n",
+        Serial.printf("[vink3][cjk] ReadPaper V3 UI subset fallback loaded: glyphs=%lu size=%lu\n",
                       static_cast<unsigned long>(readPaperCharCount_),
                       static_cast<unsigned long>(g_readpaper_ui_font_size));
         return true;
     }
 
-    // Fallback only. UI should be independent of SD card fonts.
-    if (font_.loadBundledFont(FONT_FILE_20)) {
-        Serial.println("[vink3][cjk] bundled 20px UI font loaded");
-        return true;
-    }
-    if (font_.loadBundledFont(FONT_FILE_16)) {
-        Serial.println("[vink3][cjk] bundled 16px UI font loaded");
-        return true;
-    }
     if (font_.loadBuiltinFont()) {
         Serial.println("[vink3][cjk] fallback built-in UI font loaded");
         return true;

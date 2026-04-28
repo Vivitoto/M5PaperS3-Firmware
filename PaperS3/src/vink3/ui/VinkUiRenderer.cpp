@@ -91,6 +91,32 @@ void VinkUiRenderer::drawButton(int16_t x, int16_t y, int16_t w, int16_t h, cons
     g_cjkText.drawCentered(x, y, w, h, label ? label : "", TFT_BLACK);
 }
 
+void VinkUiRenderer::drawSettingsRow(int16_t y, const char* label, const char* value) {
+    static constexpr int16_t kRowX = 56;
+    static constexpr int16_t kValueRight = 448;
+    static constexpr int16_t kArrowX = 474;
+    static constexpr int16_t kTextYAdjust = -2;
+    const int16_t baselineY = y + 22;
+    g_cjkText.drawText(kRowX, baselineY + kTextYAdjust, label ? label : "", TFT_BLACK);
+    if (value && value[0]) {
+        g_cjkText.drawRight(kValueRight, baselineY + kTextYAdjust, value, kGrayText);
+    }
+    // Arrow is drawn on the same vertical center as the row label/value, not as
+    // a separate approximate glyph baseline. This keeps settings rows aligned.
+    const int16_t cy = y + 32;
+    canvas_->drawLine(kArrowX, cy - 9, kArrowX + 9, cy, TFT_BLACK);
+    canvas_->drawLine(kArrowX + 9, cy, kArrowX, cy + 9, TFT_BLACK);
+}
+
+void VinkUiRenderer::drawSettingsGroup(int16_t y, const char* title, const char* row1, const char* row1Value, const char* row2, const char* row2Value) {
+    canvas_->fillRoundRect(28, y, 484, 136, 18, kGrayLight);
+    canvas_->drawRoundRect(28, y, 484, 136, 18, TFT_BLACK);
+    g_cjkText.drawText(56, y + 14, title ? title : "", kGrayText);
+    drawSettingsRow(y + 42, row1, row1Value);
+    canvas_->drawFastHLine(56, y + 84, 424, kGrayMid);
+    drawSettingsRow(y + 84, row2, row2Value);
+}
+
 void VinkUiRenderer::drawFooterHint(const char* hint) {
     g_cjkText.drawCentered(0, kPaperS3Height - 42, kPaperS3Width, 28, hint ? hint : "点击标签或卡片", kGrayText);
 }
@@ -117,7 +143,7 @@ void VinkUiRenderer::renderReaderHome() {
     drawButton(304, 292, 180, 44, "书架");
     drawCard(28, 370, 224, 132, "目录", "章节 / 跳页");
     drawCard(288, 370, 224, 132, "标注", "书签 / 截图");
-    drawCard(28, 532, 484, 220, "正文设置", "自动翻页 / 刷新 / 字号 / 竖排 / 繁简");
+    drawCard(28, 532, 484, 220, "正文设置", "自动翻页 / 刷新 / 字号 / 竖排 / 简体中文");
     drawFooterHint("当前书设置留在正文页，设置页只管默认值");
 }
 
@@ -158,11 +184,11 @@ void VinkUiRenderer::renderSettings() {
     clear();
     drawStatusBar("设置");
     drawTabs(SystemState::Settings);
-    drawCard(28, kContentY, 484, 132, "显示默认", "刷新策略 / 深色 / 旋转 / 质量");
-    drawCard(28, 318, 484, 132, "阅读默认", "默认字体 / 默认字号 / 默认横竖排");
-    drawCard(28, 476, 484, 132, "网络", "WiFi / WebDAV / Legado 地址");
-    drawCard(28, 634, 484, 132, "系统", "电池 / 睡眠 / 版本 / 调试");
-    drawFooterHint("全局默认放这里；正文临场设置放阅读页");
+    drawSettingsGroup(kContentY, "阅读", "正文字体", "默认", "字号与行距", "默认");
+    drawSettingsGroup(314, "显示", "刷新策略", "均衡", "深色模式", "关闭");
+    drawSettingsGroup(468, "连接", "WiFi", "配置", "Legado", "地址");
+    drawSettingsGroup(622, "系统", "电池与休眠", "自动", "关于", "v0.3.0");
+    drawFooterHint("设置项文字、右侧值和箭头保持同一水平线");
 }
 
 void VinkUiRenderer::renderLegadoSync(const char* status) {

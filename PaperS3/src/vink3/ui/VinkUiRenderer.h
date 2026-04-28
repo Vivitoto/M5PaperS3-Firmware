@@ -38,6 +38,8 @@ private:
     void drawTabs(SystemState active);
     void drawCard(int16_t x, int16_t y, int16_t w, int16_t h, const char* title, const char* body);
     void drawButton(int16_t x, int16_t y, int16_t w, int16_t h, const char* label);
+    void drawSettingsGroup(int16_t y, const char* title, const char* row1, const char* row1Value, const char* row2, const char* row2Value);
+    void drawSettingsRow(int16_t y, const char* label, const char* value);
     void drawFooterHint(const char* hint);
     UiAction hitTestTabs(int16_t x, int16_t y) const;
 
