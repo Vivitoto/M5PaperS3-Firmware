@@ -17,6 +17,10 @@ public:
 
     void renderOpenOrHelp();
     void renderCurrent();
+    void renderLibraryPage(uint16_t page = 0);
+    bool nextLibraryPage();
+    bool prevLibraryPage();
+    bool handleLibraryTap(int16_t x, int16_t y);
     void renderTocPage(uint16_t page = 0);
     bool nextPage();
     bool prevPage();
@@ -28,12 +32,18 @@ public:
 private:
     static constexpr int kMaxTocEntries = 1200;
     static constexpr int kTocEntriesPerPage = 13;
-    static constexpr int16_t kTocFirstRowY = 128;
+    static constexpr int kMaxBooks = 80;
+    static constexpr int kBooksPerPage = 12;
+    static constexpr int16_t kListFirstRowY = 128;
+    static constexpr int16_t kListRowH = 52;
+    static constexpr int16_t kTocFirstRowY = kListFirstRowY;
     static constexpr int16_t kTocRowH = 48;
     static constexpr int kMaxChapterPages = 512;
 
     bool ensureTocBuffer();
+    bool ensureBookBuffers();
     bool ensureSdReady();
+    bool scanBooks();
     bool isTxtPath(const char* name) const;
     void closeCurrent();
     void setTitleFromPath(const char* path);
@@ -62,6 +72,11 @@ private:
     char title_[72] = {0};
     ChapterDetectResult* toc_ = nullptr;
     uint32_t* pageStarts_ = nullptr;
+    char (*bookPaths_)[160] = nullptr;
+    char (*bookTitles_)[72] = nullptr;
+    int bookCount_ = 0;
+    uint16_t bookPage_ = 0;
+    bool booksScanned_ = false;
     int tocCount_ = 0;
     uint16_t tocPage_ = 0;
     int currentTocIndex_ = -1;
