@@ -26,6 +26,7 @@ public:
 
     void renderPlaceholderPage();
     void renderTextPage(const char* title, const char* body, uint16_t page, uint16_t totalPages, const ReaderRenderOptions& options = ReaderRenderOptions{});
+    void renderActionPage(const char* title, const char* const* infoLines, int infoCount, const char* const* actions, int actionCount, const ReaderRenderOptions& options = ReaderRenderOptions{});
     size_t measurePageBytes(const char* text, size_t len, const ReaderRenderOptions& options = ReaderRenderOptions{}) const;
 
 private:

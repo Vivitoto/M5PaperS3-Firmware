@@ -44,6 +44,12 @@ private:
     static constexpr int16_t kListRowH = 52;
     static constexpr int16_t kTocFirstRowY = kListFirstRowY;
     static constexpr int16_t kTocRowH = 48;
+    static constexpr int16_t kEntryButtonX = 70;
+    static constexpr int16_t kEntryButtonW = 400;
+    static constexpr int16_t kEntryButtonH = 64;
+    static constexpr int16_t kEntryContinueY = 540;
+    static constexpr int16_t kEntryTocY = 640;
+    static constexpr int16_t kEntryRestartY = 740;
     static constexpr int kMaxChapterPages = 512;
 
     bool ensureTocBuffer();

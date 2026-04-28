@@ -600,22 +600,19 @@ void ReaderBookService::renderBookEntryPage() {
     } else {
         strlcpy(progress, "无", sizeof(progress));
     }
-    snprintf(body, sizeof(body),
-             "书籍：%s\n"
-             "大小：%s\n"
-             "目录：%d 条\n"
-             "缓存：[%s] 读/目/页=进度/目录/页表\n"
-             "进度：%s\n\n"
-             "继续阅读\n"
-             "目录\n"
-             "从头开始\n\n"
-             "提示：点选操作；阅读中左右/上下滑动翻页。",
-             title_,
-             sizeText,
-             tocCount_,
-             flags,
-             progress);
-    g_readerText.renderTextPage("书籍入口", body, 1, 1);
+    char lineTitle[180];
+    char lineSize[48];
+    char lineToc[48];
+    char lineCache[96];
+    char lineProgress[180];
+    snprintf(lineTitle, sizeof(lineTitle), "书籍：%s", title_);
+    snprintf(lineSize, sizeof(lineSize), "大小：%s", sizeText);
+    snprintf(lineToc, sizeof(lineToc), "目录：%d 条", tocCount_);
+    snprintf(lineCache, sizeof(lineCache), "缓存：[%s] 读/目/页=进度/目录/页表", flags);
+    snprintf(lineProgress, sizeof(lineProgress), "进度：%s", progress);
+    const char* info[] = {lineTitle, lineSize, lineToc, lineCache, lineProgress, "提示：阅读中左右/上下滑动翻页"};
+    const char* actions[] = {"继续阅读", "目录", "从头开始"};
+    g_readerText.renderActionPage("书籍入口", info, 6, actions, 3);
 }
 
 bool ReaderBookService::continueReading() {
@@ -692,14 +689,14 @@ bool ReaderBookService::prevTocPage() {
 bool ReaderBookService::handleTap(int16_t x, int16_t y) {
     if (!open_) return false;
     if (showingBookEntry_) {
-        if (y >= 190 && y < 270) return continueReading();
-        if (y >= 300 && y < 380) {
+        if (x >= kEntryButtonX && x < kEntryButtonX + kEntryButtonW && y >= kEntryContinueY && y < kEntryContinueY + kEntryButtonH) return continueReading();
+        if (x >= kEntryButtonX && x < kEntryButtonX + kEntryButtonW && y >= kEntryTocY && y < kEntryTocY + kEntryButtonH) {
             showingBookEntry_ = false;
             showingToc_ = true;
             renderTocPage(tocPage_);
             return true;
         }
-        if (y >= 410 && y < 490) return restartReading();
+        if (x >= kEntryButtonX && x < kEntryButtonX + kEntryButtonW && y >= kEntryRestartY && y < kEntryRestartY + kEntryButtonH) return restartReading();
         return false;
     }
     if (!showingToc_) {

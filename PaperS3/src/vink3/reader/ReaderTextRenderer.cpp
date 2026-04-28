@@ -349,6 +349,56 @@ void ReaderTextRenderer::renderTextPage(const char* title, const char* body, uin
     drawText(kPaperS3Width - options.marginRight - textWidth(footer), kPaperS3Height - 34, footer, mid);
 }
 
+void ReaderTextRenderer::renderActionPage(const char* title, const char* const* infoLines, int infoCount, const char* const* actions, int actionCount, const ReaderRenderOptions& options) {
+    if (!canvas_) return;
+    if (!ready()) loadDefaultFont();
+    canvas_->fillSprite(options.dark ? TFT_BLACK : TFT_WHITE);
+    const uint16_t fg = options.dark ? TFT_WHITE : TFT_BLACK;
+    const uint16_t bg = options.dark ? TFT_BLACK : TFT_WHITE;
+    const uint16_t mid = options.dark ? 0xC618 : 0x8410;
+
+    drawText(options.marginLeft, 28, title ? title : "操作", mid);
+    canvas_->drawFastHLine(options.marginLeft, 64, kPaperS3Width - options.marginLeft - options.marginRight, mid);
+
+    const int16_t maxWidth = kPaperS3Width - options.marginLeft - options.marginRight;
+    const int16_t lineHeight = fontSize() + options.lineGap;
+    int16_t y = options.marginTop;
+    for (int i = 0; infoLines && i < infoCount && y < 470; ++i) {
+        const char* lineText = infoLines[i] ? infoLines[i] : "";
+        size_t start = 0;
+        int wraps = 0;
+        while (lineText[start] && wraps < 2 && y < 470) {
+            size_t end = findWrapBreak(lineText, start, maxWidth);
+            if (end <= start) break;
+            char line[256];
+            size_t n = end - start;
+            if (n >= sizeof(line)) n = sizeof(line) - 1;
+            memcpy(line, lineText + start, n);
+            line[n] = '\0';
+            drawText(options.marginLeft, y, line, fg);
+            y += lineHeight;
+            start = end;
+            wraps++;
+        }
+    }
+
+    static constexpr int16_t kButtonX = 70;
+    static constexpr int16_t kButtonW = 400;
+    static constexpr int16_t kButtonH = 64;
+    static constexpr int16_t kButtonY[] = {540, 640, 740};
+    const int drawCount = min(actionCount, static_cast<int>(sizeof(kButtonY) / sizeof(kButtonY[0])));
+    for (int i = 0; actions && i < drawCount; ++i) {
+        const int16_t by = kButtonY[i];
+        const bool primary = i == 0;
+        canvas_->fillRoundRect(kButtonX, by, kButtonW, kButtonH, 18, primary ? fg : bg);
+        canvas_->drawRoundRect(kButtonX, by, kButtonW, kButtonH, 18, fg);
+        const char* label = actions[i] ? actions[i] : "";
+        const int16_t tx = kButtonX + (kButtonW - textWidth(label)) / 2;
+        const int16_t ty = by + (kButtonH - fontSize()) / 2;
+        drawText(tx, ty, label, primary ? bg : fg);
+    }
+}
+
 void ReaderTextRenderer::renderPlaceholderPage() {
     static const char* sample =
         "这是 Vink v0.3 的正文渲染层。界面文字使用 ReadPaper UI 子集字体，正文阅读使用完整 ReadPaper Book PROGMEM 字体。\n"
