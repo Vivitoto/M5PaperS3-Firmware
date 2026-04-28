@@ -5,6 +5,12 @@
 using namespace UITheme;
 
 static FontManager* gUiFont = nullptr;
+static M5Canvas* gShellCanvas = nullptr;
+static bool gShellFrameActive = false;
+
+static LovyanGFX& uiDrawTarget() {
+    return (gShellFrameActive && gShellCanvas) ? static_cast<LovyanGFX&>(*gShellCanvas) : static_cast<LovyanGFX&>(M5.Display);
+}
 
 static constexpr int PAPER_S3_DISPLAY_ROTATION = 0;  // user-facing portrait, handle at top
 static constexpr uint32_t SHELL_FULL_REFRESH_EVERY = 20;
@@ -81,8 +87,8 @@ bool App::init() {
         showMessage("字体异常，使用备用字体", 2000);
         Serial.println("[App] Font init failed, continuing with built-in fallback if available");
     }
-    // 主 UI 也必须走 FontManager，否则 M5GFX 内置字体无法完整显示中文。
-    gUiFont = &_font;
+    // 主 UI 固定走内置 UI 字体；阅读正文才允许后续切换 SD 字体。
+    gUiFont = &_uiFont;
     
     if (sdReady) {
         if (!SD.exists(BOOKS_DIR)) SD.mkdir(BOOKS_DIR);
@@ -140,7 +146,7 @@ bool App::initDisplay() {
     canvas.println("Vink-PaperS3");
     canvas.setTextSize(1);
     canvas.setCursor(24, 76);
-    canvas.println("v0.2.9 中文显示修复");
+    canvas.println("v0.2.11 整页刷新修复");
     canvas.setCursor(24, 104);
     canvas.printf("Display %dx%d", display.width(), display.height());
     canvas.setCursor(24, 132);
@@ -178,24 +184,23 @@ bool App::initSD() {
 }
 
 bool App::initFont() {
-    if (_font.loadFont(FONT_FILE_24)) {
-        if (strncmp(_font.getCurrentFontPath(), "builtin://", 10) == 0) {
-            showMessage("使用内置字体", 1000);
-        } else {
-            Serial.printf("[Font] Loaded: %s\n", _font.getCurrentFontPath());
-        }
-        return true;
+    // Shell/UI uses a fixed bundled font and never reads SD card fonts.
+    // Only reading content uses `_font` and may be switched later from the
+    // reader/font settings. This avoids SD font shadowing breaking the system UI.
+    bool uiOk = _uiFont.loadBundledFont(FONT_FILE_20) || _uiFont.loadBundledFont(FONT_FILE_16);
+    if (uiOk) {
+        Serial.printf("[Font] Fixed bundled UI font active: %s\n", _uiFont.getCurrentFontPath());
     }
-    if (_font.loadFont(FONT_FILE_16)) {
-        if (strncmp(_font.getCurrentFontPath(), "builtin://", 10) == 0) {
-            showMessage("使用内置字体", 1000);
-        } else {
-            Serial.printf("[Font] Loaded: %s\n", _font.getCurrentFontPath());
-        }
-        return true;
+
+    bool readerOk = _font.loadBundledFont(FONT_FILE_24) || _font.loadBundledFont(FONT_FILE_20) || _font.loadBundledFont(FONT_FILE_16);
+    if (readerOk) {
+        Serial.printf("[Font] Reader default font active: %s\n", _font.getCurrentFontPath());
     }
-    Serial.println("[Font] No font available!");
-    return false;
+
+    if (!uiOk || !readerOk) {
+        Serial.printf("[Font] Font init incomplete: ui=%d reader=%d\n", uiOk, readerOk);
+    }
+    return uiOk && readerOk;
 }
 
 void App::scanFonts() {
@@ -281,7 +286,7 @@ void App::handleInit() {
 void App::handleFileBrowser() {
     static bool needsRender = true;
     if (needsRender) {
-        auto& display = M5.Display;
+        auto& display = uiDrawTarget();
         display.clear();
         
         // 标题
@@ -330,7 +335,7 @@ void App::handleReader() {
 
 // ===== 主菜单（分组式扁平列表）=====
 void App::handleMenu() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -373,7 +378,7 @@ void App::handleMenu() {
 
 // ===== 章节目录菜单 =====
 void App::handleChapterMenu() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -423,7 +428,7 @@ void App::handleChapterMenu() {
 
 // ===== 残影控制菜单 =====
 void App::handleRefreshMenu() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -458,7 +463,7 @@ void App::handleRefreshMenu() {
 
 // ===== 书签菜单 =====
 void App::handleBookmarkMenu() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -503,7 +508,7 @@ void App::handleBookmarkMenu() {
 
 // ===== 排版设置子菜单 =====
 void App::handleLayoutMenu() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -851,7 +856,7 @@ void App::onTap(int x, int y) {
                             saveGlobalSettings();
                             _tabNeedsRender[3] = true;
                             break;
-                        case 7: showMessage("Vink-PaperS3 v0.2.9", 3000); break;
+                        case 7: showMessage("Vink-PaperS3 v0.2.11", 3000); break;
                     }
                 }
                 return;
@@ -1504,7 +1509,7 @@ int App::clamp(int val, int minVal, int maxVal) {
 }
 
 void App::showMessage(const char* msg, int durationMs) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     display.fillScreen(BG_LIGHT);
     drawUiTextCentered(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, msg, TEXT_BLACK);
@@ -1552,7 +1557,7 @@ void App::saveGlobalSettings() {
 
 void App::drawBatteryIcon(int x, int y) {
 #if BATTERY_ICON_ENABLED
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     BatteryInfo bat = BatteryInfo::read();
     if (!bat.valid) return;
     
@@ -1708,7 +1713,7 @@ void App::enterSleep() {
 
 void App::drawSleepScreen() {
     prepareShellFrame();
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
 
     UITheme::drawCard(60, 250, SCREEN_WIDTH - 120, 300, BG_WHITE, BORDER_LIGHT);
     drawUiTextCentered(60, 280, SCREEN_WIDTH - 120, 42, "休眠中", TEXT_BLACK);
@@ -1788,7 +1793,7 @@ void App::handleEndOfBook() {
 }
 
 void App::handleGotoPage() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -1833,7 +1838,7 @@ void App::wakeUp() {
     } else if (isTabState(_state)) {
         _browser.render();
     } else {
-        auto& display = M5.Display;
+        auto& display = uiDrawTarget();
         display.clear();
         display.display();
     }
@@ -1842,7 +1847,7 @@ void App::wakeUp() {
 // ===== 字体切换菜单 =====
 
 void App::handleFontMenu() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -1880,7 +1885,7 @@ void App::handleFontMenu() {
 // ===== WiFi传书界面 =====
 
 void App::handleWiFiUpload() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     
     display.setTextSize(2);
@@ -1922,7 +1927,7 @@ void App::handleWiFiUpload() {
 // ===== 阅读统计 =====
 
 void App::handleReadingStats() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
     drawBackHeader("阅读统计", "统计当前书籍和累计阅读");
 
@@ -1963,7 +1968,7 @@ void App::checkBleCommands() {
 }
 
 void App::handleLegadoSync() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
     drawBackHeader("Legado同步", "WebDAV 阅读进度同步");
 
@@ -1983,7 +1988,7 @@ void App::handleLegadoSync() {
 }
 
 void App::handleWiFiConfig() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
     drawBackHeader("WiFi配置", "在SD卡根目录编辑配置文件");
 
@@ -2104,7 +2109,7 @@ static int16_t uiTextWidth(const char* text) {
 
 static void drawUiGlyph(uint32_t unicode, int16_t x, int16_t y, uint16_t color) {
     if (!gUiFont || !gUiFont->isLoaded()) return;
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     if (gUiFont->getFontType() == FontType::GRAY_4BPP) {
         uint8_t width, height, advance;
         int8_t bearingX, bearingY;
@@ -2135,7 +2140,7 @@ static void drawUiGlyph(uint32_t unicode, int16_t x, int16_t y, uint16_t color) 
 }
 
 static void drawUiText(int16_t x, int16_t y, const char* text, uint16_t color, uint16_t bg) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     if (!text) return;
     if (!gUiFont || !gUiFont->isLoaded()) {
         display.setTextColor(color, bg);
@@ -2165,12 +2170,12 @@ static void drawUiTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const
 static void drawUiSectionTitle(int16_t x, int16_t y, const char* title) {
     drawUiText(x, y, title, TEXT_BLACK, BG_LIGHT);
     int16_t tw = uiTextWidth(title);
-    M5.Display.drawLine(x, y + 30, x + tw, y + 30, ACCENT);
-    M5.Display.drawLine(x, y + 31, x + tw, y + 31, ACCENT);
+    uiDrawTarget().drawLine(x, y + 30, x + tw, y + 30, ACCENT);
+    uiDrawTarget().drawLine(x, y + 31, x + tw, y + 31, ACCENT);
 }
 
 static void drawUiCapsuleSwitch(int16_t x, int16_t y, int16_t w, bool on) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     int16_t h = 28;
     int16_t r = h / 2;
     UITheme::fillRoundRect(x, y, w, h, r, on ? ACCENT : BG_MID);
@@ -2180,7 +2185,7 @@ static void drawUiCapsuleSwitch(int16_t x, int16_t y, int16_t w, bool on) {
 }
 
 static void drawUiSlider(int16_t x, int16_t y, int16_t w, int16_t minVal, int16_t maxVal, int16_t current, const char* unit) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     int16_t trackH = 6;
     int16_t knobR = 10;
     display.drawRoundRect(x, y + (knobR - trackH / 2) - 1, w, trackH + 2, 4, BORDER_LIGHT);
@@ -2194,7 +2199,7 @@ static void drawUiSlider(int16_t x, int16_t y, int16_t w, int16_t minVal, int16_
 }
 
 static void drawSmallProgress(int16_t x, int16_t y, int16_t w, int percent) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     if (percent < 0) percent = 0;
     if (percent > 100) percent = 100;
     display.drawRect(x, y, w, 6, TEXT_BLACK);
@@ -2203,7 +2208,7 @@ static void drawSmallProgress(int16_t x, int16_t y, int16_t w, int percent) {
 }
 
 static void drawRowIcon(int16_t x, int16_t y, const char* kind) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     if (!kind) kind = "book";
     if (strcmp(kind, "book") == 0) {
         display.drawRoundRect(x, y, 26, 22, 3, TEXT_BLACK);
@@ -2227,7 +2232,7 @@ static void drawRowIcon(int16_t x, int16_t y, const char* kind) {
 }
 
 static void drawBookCoverCard(int16_t x, int16_t y, int16_t w, int16_t h, const char* title, const char* type, int progress, bool dark) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     UITheme::drawCard(x, y, w, h, dark ? BG_DARK : BG_WHITE, BORDER_LIGHT);
     uint16_t fg = dark ? BG_WHITE : TEXT_BLACK;
     uint16_t bg = dark ? BG_DARK : BG_WHITE;
@@ -2254,21 +2259,40 @@ static void drawBookCoverCard(int16_t x, int16_t y, int16_t w, int16_t h, const 
     if (progress >= 0) drawSmallProgress(x + 8, y + h - 8, w - 16, progress);
 }
 
+static void formatStatusTime(char* out, size_t outSize) {
+    if (!out || outSize == 0) return;
+    out[0] = '\0';
+
+    m5::rtc_time_t rtc;
+    if (M5.Rtc.isEnabled() && M5.Rtc.getTime(&rtc) &&
+        rtc.hours >= 0 && rtc.hours < 24 && rtc.minutes >= 0 && rtc.minutes < 60) {
+        snprintf(out, outSize, "%02d:%02d", rtc.hours, rtc.minutes);
+        return;
+    }
+
+    snprintf(out, outSize, "--:--");
+}
+
 static void drawCrosslinkStatusBar() {
-    auto& display = M5.Display;
-    drawUiText(22, 9, "Vink e-reader", TEXT_MID, BG_LIGHT);
+    auto& display = uiDrawTarget();
+    char timeText[12];
+    formatStatusTime(timeText, sizeof(timeText));
+    drawUiText(22, 8, timeText, TEXT_MID, BG_LIGHT);
 #if BATTERY_ICON_ENABLED
     BatteryInfo bat = BatteryInfo::read();
+    const int16_t iconX = SCREEN_WIDTH - 44;
+    const int16_t iconY = 10;
     char batText[12];
     if (bat.valid) {
         snprintf(batText, sizeof(batText), "%d%%", bat.level);
-        drawUiText(SCREEN_WIDTH - 78, 9, batText, TEXT_MID, BG_LIGHT);
+        int16_t tw = uiTextWidth(batText);
+        drawUiText(iconX - tw - 10, 8, batText, TEXT_MID, BG_LIGHT);
     }
-    display.drawRect(SCREEN_WIDTH - 38, 11, 24, 12, TEXT_BLACK);
-    display.drawRect(SCREEN_WIDTH - 14, 14, 3, 6, TEXT_BLACK);
+    display.drawRect(iconX, iconY + 2, 26, 13, TEXT_BLACK);
+    display.drawRect(iconX + 26, iconY + 6, 3, 5, TEXT_BLACK);
     if (bat.valid) {
-        int fillW = (bat.level * 20) / 100;
-        if (fillW > 0) display.fillRect(SCREEN_WIDTH - 36, 13, fillW, 8, TEXT_BLACK);
+        int fillW = (bat.level * 22) / 100;
+        if (fillW > 0) display.fillRect(iconX + 2, iconY + 4, fillW, 9, TEXT_BLACK);
     }
 #endif
     display.drawLine(20, 32, SCREEN_WIDTH - 20, 32, BORDER_LIGHT);
@@ -2279,26 +2303,54 @@ static void prepareShellFrame() {
     display.waitDisplay();
     display.powerSaveOff();
     display.setEpdMode(epd_mode_t::epd_fastest);
-    display.fillScreen(BG_LIGHT);
+
+    if (!gShellCanvas) {
+        gShellCanvas = new M5Canvas(&display);
+        if (gShellCanvas) {
+            gShellCanvas->setColorDepth(4);
+            if (!gShellCanvas->createSprite(SCREEN_WIDTH, SCREEN_HEIGHT)) {
+                Serial.println("[Shell] Failed to allocate shell canvas, falling back to direct draw");
+                delete gShellCanvas;
+                gShellCanvas = nullptr;
+            }
+        }
+    }
+
+    gShellFrameActive = (gShellCanvas != nullptr);
+    UITheme::setDrawTarget(gShellFrameActive ? static_cast<LovyanGFX*>(gShellCanvas) : nullptr);
+
+    auto& target = uiDrawTarget();
+    target.fillScreen(BG_LIGHT);
 }
 
 static void commitShellFrame() {
     auto& display = M5.Display;
-    // Dashboard reference pattern: shell draws into M5GFX framebuffer freely,
-    // then performs one physical e-paper commit. Most commits use fastest mode;
-    // every N commits use quality mode to reduce accumulated ghosting.
+    // Draw the whole shell into an off-screen M5Canvas first, then push once.
+    // Direct glyph drawing on PaperS3 visibly refreshes one character at a time
+    // and later display commits can lose those glyph pixels.
     if (gShellCommitCount > 0 && (gShellCommitCount % SHELL_FULL_REFRESH_EVERY) == 0) {
         display.setEpdMode(epd_mode_t::epd_quality);
     } else {
         display.setEpdMode(epd_mode_t::epd_fastest);
     }
-    display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
-    display.waitDisplay();
+
+    if (gShellFrameActive && gShellCanvas) {
+        UITheme::setDrawTarget(nullptr);
+        gShellFrameActive = false;
+        display.waitDisplay();
+        gShellCanvas->pushSprite(0, 0);
+        display.waitDisplay();
+    } else {
+        display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);
+        display.waitDisplay();
+        UITheme::setDrawTarget(nullptr);
+        gShellFrameActive = false;
+    }
     gShellCommitCount++;
 }
 
 static void drawBackHeader(const char* title, const char* hint) {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     drawUiText(20, 22, "<", TEXT_BLACK, BG_LIGHT);
     drawUiText(64, 22, title, TEXT_BLACK, BG_LIGHT);
     drawUiText(20, 58, hint, TEXT_MID, BG_LIGHT);
@@ -2346,11 +2398,10 @@ void App::navigateBack() {
 }
 
 void App::renderTopTabs() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     drawCrosslinkStatusBar();
 
     const char* tabs[] = {"阅读", "书架", "传输", "设置"};
-    const char* icons[] = {"book", "book", "wifi", "settings"};
     int16_t tabW = (SCREEN_WIDTH - 40) / 4;
     int16_t baseX = 20;
     int16_t tabY = 34;
@@ -2365,27 +2416,43 @@ void App::renderTopTabs() {
         } else {
             display.drawRoundRect(x, tabY, tabW + 6, tabH - 6, 8, BORDER_LIGHT);
         }
-        if (i == 0 || i == 1) {
-            uint16_t c = active ? BG_WHITE : TEXT_MID;
-            int ix = x + 16;
-            int iy = tabY + 11;
-            display.drawRoundRect(ix, iy, 22, 18, 3, c);
-            display.drawLine(ix + 11, iy + 2, ix + 11, iy + 17, c);
+        uint16_t c = active ? BG_WHITE : TEXT_MID;
+        int ix = x + 16;
+        int iy = tabY + 11;
+        if (i == 0) {
+            // 阅读：打开的书
+            display.drawRoundRect(ix, iy + 1, 24, 18, 3, c);
+            display.drawLine(ix + 12, iy + 3, ix + 12, iy + 18, c);
+            display.drawLine(ix + 5, iy + 6, ix + 10, iy + 5, c);
+            display.drawLine(ix + 14, iy + 5, ix + 20, iy + 6, c);
+        } else if (i == 1) {
+            // 书架：三本竖排书，和阅读图标区分
+            display.drawRect(ix + 2, iy + 2, 5, 21, c);
+            display.drawRect(ix + 9, iy + 5, 5, 18, c);
+            display.drawRect(ix + 16, iy + 1, 6, 22, c);
+            display.drawLine(ix + 3, iy + 7, ix + 6, iy + 7, c);
+            display.drawLine(ix + 10, iy + 10, ix + 13, iy + 10, c);
+            display.drawLine(ix + 17, iy + 6, ix + 21, iy + 6, c);
+            display.drawLine(ix, iy + 24, ix + 25, iy + 24, c);
         } else if (i == 2) {
-            uint16_t c = active ? BG_WHITE : TEXT_MID;
-            int ix = x + 16;
-            int iy = tabY + 11;
             display.drawCircle(ix + 12, iy + 16, 2, c);
             display.drawCircle(ix + 12, iy + 16, 8, c);
             display.drawCircle(ix + 12, iy + 16, 14, c);
             display.fillRect(ix - 3, iy + 14, 30, 16, active ? ACCENT : BG_LIGHT);
         } else {
-            uint16_t c = active ? BG_WHITE : TEXT_MID;
-            display.drawCircle(x + 25, tabY + 20, 9, c);
-            display.drawLine(x + 25, tabY + 8, x + 25, tabY + 13, c);
-            display.drawLine(x + 25, tabY + 27, x + 25, tabY + 32, c);
-            display.drawLine(x + 13, tabY + 20, x + 18, tabY + 20, c);
-            display.drawLine(x + 32, tabY + 20, x + 37, tabY + 20, c);
+            // 设置：齿轮
+            int cx = ix + 13;
+            int cy = iy + 13;
+            display.drawCircle(cx, cy, 8, c);
+            display.drawCircle(cx, cy, 3, c);
+            display.drawLine(cx, cy - 14, cx, cy - 9, c);
+            display.drawLine(cx, cy + 9, cx, cy + 14, c);
+            display.drawLine(cx - 14, cy, cx - 9, cy, c);
+            display.drawLine(cx + 9, cy, cx + 14, cy, c);
+            display.drawLine(cx - 10, cy - 10, cx - 7, cy - 7, c);
+            display.drawLine(cx + 7, cy - 7, cx + 10, cy - 10, c);
+            display.drawLine(cx - 10, cy + 10, cx - 7, cy + 7, c);
+            display.drawLine(cx + 7, cy + 7, cx + 10, cy + 10, c);
         }
         drawUiTextCentered(x + 38, tabY + 8, tabW - 40, 28, tabs[i], active ? BG_WHITE : TEXT_MID);
     }
@@ -2422,75 +2489,90 @@ void App::handleTabReading() {
     static bool needsRender = true;
     if (!needsRender && !_tabNeedsRender[0]) return;
 
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
     renderTopTabs();
 
     const int16_t x = contentLeft() + 6;
     const int16_t w = contentWidth() - 12;
-    int16_t y = contentTop() + 2;
+    int16_t y = contentTop() - 2;
     int recentCount = _recent.getCount();
 
-    drawUiText(x, y, "正在阅读", TEXT_BLACK, BG_LIGHT);
-    y += 40;
+    // Crosslink reference is denser: a compact title row, one dominant current
+    // card, a thumbnail grid, stats, then small action chips instead of one big
+    // empty panel.
+    drawUiText(x, y, "阅读", TEXT_BLACK, BG_LIGHT);
+    drawUiText(x + w - 112, y + 2, recentCount > 0 ? "继续阅读" : "准备开始", TEXT_MID, BG_LIGHT);
+    y += 34;
 
-    if (recentCount > 0) {
-        const RecentBook* book = _recent.getBook(0);
-        int pct = _recent.getProgressPercent(0);
-        UITheme::drawCard(x, y, w, 178, BG_WHITE, BORDER_LIGHT);
-        drawBookCoverCard(x + 16, y + 16, 112, 140, book ? book->name : "当前书籍", "TXT", pct, false);
-        drawUiText(x + 148, y + 24, book ? book->name : "当前书籍", TEXT_BLACK, BG_WHITE);
-        drawUiText(x + 148, y + 58, "本地书籍", TEXT_MID, BG_WHITE);
-        char line[64];
-        snprintf(line, sizeof(line), "当前进度 %d%%", pct);
-        drawUiText(x + 148, y + 94, line, TEXT_BLACK, BG_WHITE);
-        if (book && book->totalPages > 0) {
-            snprintf(line, sizeof(line), "#%d/%d 页", book->currentPage + 1, book->totalPages);
-            drawUiText(x + 330, y + 94, line, TEXT_BLACK, BG_WHITE);
-        }
-        drawSmallProgress(x + 148, y + 132, w - 180, pct);
+    UITheme::drawCard(x, y, w, 186, BG_WHITE, BORDER_LIGHT);
+    const RecentBook* current = recentCount > 0 ? _recent.getBook(0) : nullptr;
+    int pct = current ? _recent.getProgressPercent(0) : 0;
+    drawBookCoverCard(x + 14, y + 14, 116, 154, current ? current->name : "Vink", current ? "TXT" : "BOOK", pct, false);
+    drawUiText(x + 146, y + 18, current ? current->name : "还没有正在阅读的书", TEXT_BLACK, BG_WHITE);
+    drawUiText(x + 146, y + 50, current ? "本地书籍 / 继续阅读" : "从书架选择一本书，或通过传输加入", TEXT_MID, BG_WHITE);
+    char line[72];
+    snprintf(line, sizeof(line), "当前进度 %d%%", pct);
+    drawUiText(x + 146, y + 86, line, TEXT_BLACK, BG_WHITE);
+    if (current && current->totalPages > 0) {
+        snprintf(line, sizeof(line), "%d / %d 页", current->currentPage + 1, current->totalPages);
+        drawUiText(x + 320, y + 86, line, TEXT_BLACK, BG_WHITE);
     } else {
-        UITheme::drawCard(x, y, w, 178, BG_WHITE, BORDER_LIGHT);
-        drawRowIcon(x + 26, y + 30, "book");
-        drawUiText(x + 70, y + 30, "还没有正在阅读的书", TEXT_BLACK, BG_WHITE);
-        drawUiText(x + 70, y + 72, "去书架选择一本书开始阅读", TEXT_MID, BG_WHITE);
-        UITheme::drawCard(x + 70, y + 116, 180, 42, BG_WHITE, BORDER);
-        drawUiTextCentered(x + 70, y + 116, 180, 42, "打开书架", TEXT_BLACK);
+        drawUiText(x + 320, y + 86, "等待导入", TEXT_MID, BG_WHITE);
     }
+    drawSmallProgress(x + 146, y + 122, w - 174, pct);
+    UITheme::drawCard(x + 146, y + 144, 110, 28, BG_WHITE, BORDER_LIGHT);
+    drawUiTextCentered(x + 146, y + 144, 110, 28, current ? "打开" : "书架", TEXT_BLACK);
+    UITheme::drawCard(x + 268, y + 144, 110, 28, BG_WHITE, BORDER_LIGHT);
+    drawUiTextCentered(x + 268, y + 144, 110, 28, "传书", TEXT_BLACK);
     y += 208;
 
-    if (recentCount > 1) {
-        const int coverW = (w - 24) / 3;
-        const int coverH = 174;
-        for (int i = 0; i < 3; i++) {
-            const RecentBook* book = _recent.getBook(i + 1);
-            int bx = x + i * (coverW + 12);
-            if (book) {
-                drawBookCoverCard(bx, y, coverW, coverH, book->name, "TXT", _recent.getProgressPercent(i + 1), i == 2);
-            } else {
-                UITheme::drawCard(bx, y, coverW, coverH, BG_WHITE, BORDER_LIGHT);
-            }
+    drawUiText(x, y, "最近书籍", TEXT_BLACK, BG_LIGHT);
+    y += 34;
+    const int miniGap = 10;
+    const int miniW = (w - miniGap * 3) / 4;
+    const int miniH = 146;
+    for (int i = 0; i < 4; i++) {
+        int bx = x + i * (miniW + miniGap);
+        const RecentBook* book = (i + 1 < recentCount) ? _recent.getBook(i + 1) : nullptr;
+        if (book) {
+            drawBookCoverCard(bx, y, miniW, miniH, book->name, "TXT", _recent.getProgressPercent(i + 1), false);
+        } else {
+            UITheme::drawCard(bx, y, miniW, miniH, BG_WHITE, BORDER_LIGHT);
+            display.drawRect(bx + 14, y + 12, miniW - 28, 72, TEXT_MID);
+            display.drawLine(bx + 18, y + 22, bx + miniW - 18, y + 70, TEXT_MID);
+            drawUiTextCentered(bx + 4, y + 94, miniW - 8, 24, i == 0 ? "打开SD卡" : "空位", TEXT_MID);
         }
-        y += coverH + 36;
     }
+    y += miniH + 28;
 
     drawUiText(x, y, "阅读统计", TEXT_BLACK, BG_LIGHT);
-    y += 42;
-    const int statGap = 12;
+    y += 34;
+    const int statGap = 10;
     const int statW = (w - statGap * 2) / 3;
     struct StatCard { const char* icon; const char* label; String value; const char* unit; };
     StatCard stats[] = {
-        {"clock", "上次阅读", String(_stats.formatTime(_stats.getTodaySeconds())), ""},
-        {"stats", "累计阅读", String(_stats.formatTime(_stats.getTotalReadingSeconds())), ""},
-        {"book", "累计翻页", String(_stats.getTotalPagesRead()), "页"},
+        {"clock", "今日", String(_stats.formatTime(_stats.getTodaySeconds())), ""},
+        {"stats", "累计", String(_stats.formatTime(_stats.getTotalReadingSeconds())), ""},
+        {"book", "翻页", String(_stats.getTotalPagesRead()), "页"},
     };
     for (int i = 0; i < 3; i++) {
         int sx = x + i * (statW + statGap);
-        UITheme::drawCard(sx, y, statW, 124, BG_WHITE, BORDER_LIGHT);
-        drawRowIcon(sx + 14, y + 16, stats[i].icon);
-        drawUiText(sx + 46, y + 18, stats[i].label, TEXT_MID, BG_WHITE);
-        drawUiText(sx + 16, y + 68, stats[i].value.c_str(), TEXT_BLACK, BG_WHITE);
-        if (stats[i].unit && strlen(stats[i].unit) > 0) drawUiText(sx + statW - 42, y + 72, stats[i].unit, TEXT_BLACK, BG_WHITE);
+        UITheme::drawCard(sx, y, statW, 104, BG_WHITE, BORDER_LIGHT);
+        drawRowIcon(sx + 12, y + 14, stats[i].icon);
+        drawUiText(sx + 42, y + 14, stats[i].label, TEXT_MID, BG_WHITE);
+        drawUiText(sx + 14, y + 58, stats[i].value.c_str(), TEXT_BLACK, BG_WHITE);
+        if (stats[i].unit && strlen(stats[i].unit) > 0) drawUiText(sx + statW - 34, y + 62, stats[i].unit, TEXT_BLACK, BG_WHITE);
+    }
+    y += 126;
+
+    const char* chips[] = {"书架", "传书", "正文字体", "刷新"};
+    const int chipGap = 8;
+    const int chipW = (w - chipGap * 3) / 4;
+    for (int i = 0; i < 4; i++) {
+        int cx = x + i * (chipW + chipGap);
+        UITheme::drawCard(cx, y, chipW, 42, BG_WHITE, BORDER_LIGHT);
+        drawUiTextCentered(cx, y, chipW, 42, chips[i], TEXT_BLACK);
     }
 
     commitShellFrame();
@@ -2503,7 +2585,7 @@ void App::handleTabLibrary() {
     static bool needsRender = true;
     if (!needsRender && !_tabNeedsRender[1]) return;
 
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
     renderTopTabs();
 
@@ -2521,12 +2603,30 @@ void App::handleTabLibrary() {
     y += 48;
 
     if (totalBooks == 0) {
-        UITheme::drawCard(x, y + 24, w, 330, BG_WHITE, BORDER_LIGHT);
-        drawRowIcon(x + w / 2 - 13, y + 76, "book");
-        drawUiTextCentered(x, y + 122, w, 42, "书架为空", TEXT_BLACK);
-        drawUiTextCentered(x, y + 170, w, 36, "请将 TXT / EPUB 放入 SD 卡 /books", TEXT_MID);
-        UITheme::drawCard(x + (w - 210) / 2, y + 236, 210, 54, BG_WHITE, BORDER);
-        drawUiTextCentered(x + (w - 210) / 2, y + 236, 210, 54, "打开SD卡", TEXT_BLACK);
+        // Empty state still follows the reference: keep a bookshelf grid visible
+        // instead of one large blank panel, then provide a compact import action.
+        const int cols = 3;
+        const int gapX = 12;
+        const int gapY = 16;
+        const int cardW = (w - gapX * 2) / 3;
+        const int cardH = 154;
+        for (int i = 0; i < 6; i++) {
+            int col = i % cols;
+            int row = i / cols;
+            int bx = x + col * (cardW + gapX);
+            int by = y + row * (cardH + gapY);
+            UITheme::drawCard(bx, by, cardW, cardH, BG_WHITE, BORDER_LIGHT);
+            display.drawRect(bx + 20, by + 16, cardW - 40, 82, TEXT_MID);
+            display.drawLine(bx + 24, by + 28, bx + cardW - 24, by + 84, TEXT_MID);
+            drawUiTextCentered(bx + 4, by + 110, cardW - 8, 24, i == 0 ? "等待导入" : "书籍", TEXT_MID);
+        }
+        int actionY = y + 2 * (cardH + gapY) + 12;
+        UITheme::drawCard(x, actionY, w, 132, BG_WHITE, BORDER_LIGHT);
+        drawRowIcon(x + 22, actionY + 26, "book");
+        drawUiText(x + 62, actionY + 20, "书架为空", TEXT_BLACK, BG_WHITE);
+        drawUiText(x + 62, actionY + 54, "请将 TXT / EPUB 放入 SD 卡 /books", TEXT_MID, BG_WHITE);
+        UITheme::drawCard(x + w - 158, actionY + 74, 132, 38, BG_WHITE, BORDER);
+        drawUiTextCentered(x + w - 158, actionY + 74, 132, 38, "打开SD卡", TEXT_BLACK);
         commitShellFrame();
         needsRender = false;
         _tabNeedsRender[1] = false;
@@ -2596,7 +2696,7 @@ void App::handleTabTransfer() {
     int rowY = panelY + 116;
     const int rowH = 74;
     for (int i = 0; i < 6; i++) {
-        if (i > 0) M5.Display.drawLine(x + 22, rowY - 10, x + w - 22, rowY - 10, BORDER_LIGHT);
+        if (i > 0) uiDrawTarget().drawLine(x + 22, rowY - 10, x + w - 22, rowY - 10, BORDER_LIGHT);
         drawRowIcon(x + 24, rowY + 18, items[i].icon);
         drawUiText(x + 66, rowY + 10, items[i].title, TEXT_BLACK, BG_WHITE);
         drawUiText(x + 66, rowY + 42, items[i].desc, TEXT_MID, BG_WHITE);
@@ -2606,7 +2706,7 @@ void App::handleTabTransfer() {
     }
 
     int guideY = panelY + 584;
-    M5.Display.drawLine(x + 22, guideY - 14, x + w - 22, guideY - 14, BORDER_LIGHT);
+    uiDrawTarget().drawLine(x + 22, guideY - 14, x + w - 22, guideY - 14, BORDER_LIGHT);
     drawUiText(x + 24, guideY, "触摸提示", TEXT_BLACK, BG_WHITE);
     drawUiText(x + 24, guideY + 34, "点对应行执行；左上 < 或右滑返回子页面", TEXT_MID, BG_WHITE);
 
@@ -2635,14 +2735,14 @@ void App::handleTabSettings() {
     snprintf(sleepText, sizeof(sleepText), "%d 分钟", _sleepTimeoutMin);
     struct SettingItem { const char* group; const char* title; const char* value; AppState nextState; };
     SettingItem items[] = {
-        {"字体", "预设字体", _fontCount > 0 ? _fontNames[0] : "内置字体", AppState::SETTINGS_FONT},
+        {"阅读", "正文字体", _fontCount > 0 ? _fontNames[0] : "内置字体", AppState::SETTINGS_FONT},
         {"字体", "字号", "小  中  大", AppState::SETTINGS_LAYOUT},
         {"版式", "对齐方式", "左  中  右  齐", AppState::SETTINGS_LAYOUT},
         {"版式", "刷新策略", rs.getLabel(), AppState::SETTINGS_REFRESH},
         {"连接", "WiFi配置", _wifiConfigured ? _wifiSsid : "未配置", AppState::SETTINGS_WIFI},
         {"连接", "Legado同步", _legadoConfigured ? _legadoHost : "未配置", AppState::SETTINGS_LEGADO},
         {"系统", "休眠时间", sleepText, AppState::TAB_SETTINGS},
-        {"系统", "关于", "Vink-PaperS3 v0.2.9", AppState::TAB_SETTINGS},
+        {"系统", "关于", "Vink-PaperS3 v0.2.11", AppState::TAB_SETTINGS},
     };
 
     const int numItems = 8;
@@ -2657,8 +2757,8 @@ void App::handleTabSettings() {
         }
         if (rowY + rowH >= y && rowY <= y + 720) {
             if (i == 0 || i == 3 || i == 4 || i == 6) {
-                M5.Display.fillRoundRect(x + 18, rowY + 4, w - 36, rowH - 8, 8, BG_WHITE);
-                M5.Display.drawRoundRect(x + 18, rowY + 4, w - 36, rowH - 8, 8, BORDER_LIGHT);
+                uiDrawTarget().fillRoundRect(x + 18, rowY + 4, w - 36, rowH - 8, 8, BG_WHITE);
+                uiDrawTarget().drawRoundRect(x + 18, rowY + 4, w - 36, rowH - 8, 8, BORDER_LIGHT);
             }
             drawUiText(x + 30, rowY + 18, items[i].title, TEXT_BLACK, BG_WHITE);
             drawUiText(x + w - 170, rowY + 18, items[i].value, TEXT_MID, BG_WHITE);
@@ -2674,7 +2774,7 @@ void App::handleTabSettings() {
 
 // ===== 阅读弹出菜单（半透明遮罩）=====
 void App::handleReaderMenu() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     
     // 如果菜单已经显示过，不需要重绘（底层阅读页还在）
     // 这里只做一次性绘制
@@ -2719,7 +2819,7 @@ void App::handleReaderMenu() {
 
 // ===== 排版设置（卡片式 + 滑块）=====
 void App::handleSettingsLayout() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
     drawBackHeader("排版设置", "点 < / 右滑 / 上滑返回");
 
@@ -2747,7 +2847,7 @@ void App::handleSettingsLayout() {
 
 // ===== 残影控制（胶囊开关式）=====
 void App::handleSettingsRefresh() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
     drawBackHeader("刷新策略", "点击档位切换，点 < 返回");
 
@@ -2773,9 +2873,9 @@ void App::handleSettingsRefresh() {
 
 // ===== 字体切换（列表式）=====
 void App::handleSettingsFont() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     prepareShellFrame();
-    drawBackHeader("字体切换", "点击字体切换，点 < 返回");
+    drawBackHeader("正文字体", "仅影响阅读正文，点 < 返回");
 
     if (_fontCount <= 0) {
         drawUiTextCentered(0, 260, SCREEN_WIDTH, 80, "未找到字体", TEXT_MID);
@@ -2808,7 +2908,7 @@ void App::handleSettingsLegado() {
 
 // ===== 章节目录（改进版）=====
 void App::handleChapterList() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     display.fillScreen(BG_LIGHT);
     
@@ -2864,7 +2964,7 @@ void App::handleChapterList() {
 
 // ===== 书签列表（改进版）=====
 void App::handleBookmarkList() {
-    auto& display = M5.Display;
+    auto& display = uiDrawTarget();
     display.clear();
     display.fillScreen(BG_LIGHT);
     

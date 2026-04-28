@@ -1,18 +1,29 @@
 #include "UITheme.h"
 #include <M5Unified.h>
 
+static LovyanGFX* gThemeDrawTarget = nullptr;
+
+void UITheme::setDrawTarget(LovyanGFX* target) {
+    gThemeDrawTarget = target;
+}
+
+LovyanGFX& UITheme::drawTarget() {
+    return gThemeDrawTarget ? *gThemeDrawTarget : M5.Display;
+}
+
+
 void UITheme::drawRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint16_t color) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     display.drawRoundRect(x, y, w, h, r, color);
 }
 
 void UITheme::fillRoundRect(int16_t x, int16_t y, int16_t w, int16_t h, int16_t r, uint16_t color) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     display.fillRoundRect(x, y, w, h, r, color);
 }
 
 void UITheme::drawCard(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t bgColor, uint16_t borderColor) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     // 填充背景
     fillRoundRect(x, y, w, h, CARD_RADIUS, bgColor);
     // PaperS3 上 1px 细线太虚，卡片边框统一加粗到 2px。
@@ -24,7 +35,7 @@ void UITheme::drawCard(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t bgCo
 }
 
 void UITheme::drawTabBookmark(int16_t x, int16_t y, int16_t w, int16_t h, bool active, const char* label, const char* icon) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     
     if (active) {
         // 激活态：黑底白字，顶部区域足够高，适合手指点击。
@@ -48,7 +59,7 @@ void UITheme::drawTabBookmark(int16_t x, int16_t y, int16_t w, int16_t h, bool a
 }
 
 void UITheme::drawCapsuleSwitch(int16_t x, int16_t y, int16_t w, bool on) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     int16_t h = 28;
     int16_t r = h / 2;
     
@@ -72,7 +83,7 @@ void UITheme::drawCapsuleSwitch(int16_t x, int16_t y, int16_t w, bool on) {
 }
 
 void UITheme::drawSlider(int16_t x, int16_t y, int16_t w, int16_t minVal, int16_t maxVal, int16_t current, const char* unit) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     int16_t trackH = 6;
     int16_t knobR = 10;
     
@@ -95,7 +106,7 @@ void UITheme::drawSlider(int16_t x, int16_t y, int16_t w, int16_t minVal, int16_
 }
 
 void UITheme::drawBottomNavItem(int16_t x, int16_t y, int16_t w, bool active, const char* icon, const char* label) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     
     if (active) {
         display.setTextColor(ACCENT, BG_LIGHT);
@@ -118,7 +129,7 @@ void UITheme::drawBottomNavItem(int16_t x, int16_t y, int16_t w, bool active, co
 }
 
 void UITheme::drawBookCover(int16_t x, int16_t y, int16_t w, int16_t h, const char* title, const char* author, int progressPercent) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     
     // 封面背景（模拟书本质感）
     fillRoundRect(x, y, w, h, 4, BG_MID);
@@ -170,7 +181,7 @@ void UITheme::drawBookCover(int16_t x, int16_t y, int16_t w, int16_t h, const ch
 }
 
 void UITheme::drawSectionTitle(int16_t x, int16_t y, const char* title) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     display.setTextSize(2);
     display.setTextColor(TEXT_BLACK, BG_LIGHT);
     display.setCursor(x, y);
@@ -182,12 +193,12 @@ void UITheme::drawSectionTitle(int16_t x, int16_t y, const char* title) {
 }
 
 void UITheme::drawSeparator(int16_t x, int16_t y, int16_t w) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     display.drawLine(x, y, x + w, y, BORDER_LIGHT);
 }
 
 void UITheme::drawIconButton(int16_t x, int16_t y, int16_t size, const char* icon, uint16_t bgColor) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     fillRoundRect(x, y, size, size, size/4, bgColor);
     display.setTextSize(1);
     display.setTextColor(TEXT_BLACK, bgColor);
@@ -217,7 +228,7 @@ int16_t UITheme::textWidth(const char* text, uint8_t textSize) {
 }
 
 void UITheme::drawTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const char* text, uint8_t textSize, uint16_t color) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     int16_t tw = textWidth(text, textSize);
     int16_t th = 8 * textSize;
     display.setTextColor(color, BG_LIGHT);
@@ -228,7 +239,7 @@ void UITheme::drawTextCentered(int16_t x, int16_t y, int16_t w, int16_t h, const
 }
 
 void UITheme::drawTextRight(int16_t x, int16_t y, int16_t w, const char* text, uint8_t textSize, uint16_t color) {
-    auto& display = M5.Display;
+    auto& display = UITheme::drawTarget();
     int16_t tw = textWidth(text, textSize);
     display.setTextColor(color, BG_LIGHT);
     display.setTextSize(textSize);

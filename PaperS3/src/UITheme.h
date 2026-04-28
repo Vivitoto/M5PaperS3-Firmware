@@ -6,6 +6,10 @@
 // 配色：浅灰白纸质感，墨水屏原生风格
 
 namespace UITheme {
+    // Optional draw target used by shell pages. When set to an M5Canvas, all
+    // theme primitives render off-screen and the page is pushed to e-paper once.
+    void setDrawTarget(LovyanGFX* target);
+    LovyanGFX& drawTarget();
     // PaperS3's 4bpp gray fill is rendered as a visible halftone pattern.
     // Keep the shell UI pure black/white until the full ReadPaper canvas path
     // is adopted; otherwise large gray backgrounds look like screen noise.

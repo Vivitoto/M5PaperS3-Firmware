@@ -23,7 +23,8 @@ public:
     
 private:
     AppState _state;
-    FontManager _font;
+    FontManager _uiFont;   // Shell/UI 固定内置字体，不受阅读字体切换影响
+    FontManager _font;     // 阅读正文使用，可在阅读设置里切换
     EbookReader _reader;
     FileBrowser _browser;
     WiFiUploader _uploader;

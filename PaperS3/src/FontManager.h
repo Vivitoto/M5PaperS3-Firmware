@@ -44,8 +44,10 @@ public:
     FontManager();
     ~FontManager();
     
-    // 加载字库文件（自动检测格式）
+    // 加载字库文件（自动检测格式）。默认会优先尝试 SD，然后尝试内置 SPIFFS。
     bool loadFont(const char* path);
+    // 强制从固件内置 SPIFFS 加载字库，避免 SD 卡上的旧/坏字体覆盖系统 UI 字体。
+    bool loadBundledFont(const char* path);
     // 从固件 flash(PROGMEM) 加载内置 1bpp 字库
     bool loadBuiltinFont();
     void unload();

@@ -5,6 +5,32 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v0.2.11",
+      "name": "Vink-PaperS3 v0.2.11 整页刷新修复",
+      "summary": "修复 UI 文字逐字刷新、切换 Tab 后文字消失，并进一步贴近 Crosslink/小红书参考：更紧凑阅读首页、最近书籍缩略图、空书架网格、固定内置 UI 字体、时间状态栏和区分化 Tab 图标。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.2.11",
+      "changelog": "## Vink-PaperS3 v0.2.11 整页刷新修复\n\n### 整页刷新修复\n- 修复第一页文字“一个一个刷出来”的问题。\n- 修复点击其他 Tab 后文字消失、再回第一页文字也消失的问题。\n- Shell UI 现在先绘制到内存 `M5Canvas`，包括边框、图标和中文 glyph；页面完成后再一次性 `pushSprite()` 到 PaperS3。\n- `UITheme` 新增可切换绘制目标，Shell 绘制期间所有主题组件都画到同一个离屏 Canvas。\n- 避免中文 glyph 直接逐点写入电子纸面板导致的逐字刷新和后续 framebuffer 丢字。\n\n### UI 字体策略\n- UI 固定使用固件内置 SPIFFS 字体，不读取 SD 卡字体。\n- 阅读正文仍使用独立阅读字体对象，后续只有阅读内容才涉及字体切换。\n- 保留字体头校验，旧/坏字体不会再被误判为可用。\n\n### 顶部状态栏\n- 顶部左侧由 `Vink e-reader` 改为系统时间。\n- 电池百分比和电池图标重新对齐，减轻顶部通知栏拥挤。\n- 书架 Tab 改为书架/书脊图标，和阅读 Tab 的打开书图标区分。\n- 设置 Tab 改为更接近齿轮的线框图标。\n\n### 沿用 v0.2.9 修复\n- 保持 Crosslink 风格 UI。\n- 保持 PaperS3 rotation 0 实机方向。\n- 保持触摸状态机、Tab 点击区域、阅读进度同步、Shell 刷新调度等硬件联动修复。\n\n### Crosslink 视觉密度调整\n- 阅读首页改为更接近参考图的密集 dashboard：当前书籍主卡、最近书籍四宫格、阅读统计三卡、底部快捷胶囊。\n- 空书架不再显示大面积空白，改为 3×2 书封占位网格 + 紧凑导入操作卡。\n- 继续保持小红书 Crosslink 风格的线框卡片、紧凑分区和轻量图标。\n\n### 烧录包\n- Vink Flasher 默认使用 `full` 完整 16MB 镜像，从 `0x0` 写入。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v0.2.11-canvas-refresh-fix-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.11/Vink-PaperS3-v0.2.11-canvas-refresh-fix-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        },
+        "ota": {
+          "name": "Vink-PaperS3-v0.2.11-canvas-refresh-fix-ota.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.11/Vink-PaperS3-v0.2.11-canvas-refresh-fix-ota.bin",
+          "size": 1908432,
+          "flashOffset": 65536
+        },
+        "spiffs": {
+          "name": "Vink-PaperS3-v0.2.11-canvas-refresh-fix-spiffs.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.11/Vink-PaperS3-v0.2.11-canvas-refresh-fix-spiffs.bin",
+          "size": 4128768
+        }
+      }
+    },
+    {
       "version": "v0.2.9",
       "name": "Vink-PaperS3 v0.2.9 Crosslink UI 中文修复",
       "summary": "修复中文界面显示不全、屏幕方向倒置，并按参考项目梳理 PaperS3 显示/触摸/刷新/硬件联动逻辑；UI 仍保持小红书 Crosslink 风格。",

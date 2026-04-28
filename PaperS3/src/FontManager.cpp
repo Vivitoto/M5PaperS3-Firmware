@@ -75,6 +75,50 @@ bool FontManager::loadFont(const char* path) {
     }
 }
 
+bool FontManager::loadBundledFont(const char* path) {
+    unload();
+
+    if (!ensureFontResourceFS()) {
+        Serial.println("[Font] SPIFFS unavailable for bundled font, trying builtin");
+        return loadBuiltinFont();
+    }
+
+    _file = SPIFFS.open(path, FILE_READ);
+    if (!_file) {
+        Serial.printf("[Font] Bundled font missing: %s, trying builtin\n", path);
+        return loadBuiltinFont();
+    }
+
+    strncpy(_currentPath, path, sizeof(_currentPath) - 1);
+    _currentPath[sizeof(_currentPath) - 1] = '\0';
+
+    char magic[4];
+    if (_file.read((uint8_t*)magic, 4) != 4) {
+        Serial.println("[Font] Failed to read bundled font magic, trying builtin");
+        _file.close();
+        return loadBuiltinFont();
+    }
+    _file.seek(0);
+
+    bool ok = false;
+    if (strncmp(magic, "GRAY", 4) == 0) {
+        ok = loadGrayFont();
+    } else if (strncmp(magic, "FNT", 3) == 0) {
+        ok = loadBitmapFont();
+    } else {
+        Serial.printf("[Font] Unknown bundled font format: %.4s\n", magic);
+        _file.close();
+    }
+
+    if (ok) {
+        Serial.printf("[Font] Loaded bundled UI font from SPIFFS: %s\n", path);
+        return true;
+    }
+
+    Serial.println("[Font] Bundled font failed, trying builtin");
+    return loadBuiltinFont();
+}
+
 bool FontManager::loadBuiltinFont() {
     unload();
 
@@ -128,6 +172,12 @@ bool FontManager::loadBitmapFont() {
         return false;
     }
     
+    if (strncmp(_header_1bpp.magic, "FNT", 3) != 0 || _header_1bpp.charCount == 0) {
+        Serial.println("[Font] Invalid 1bpp header");
+        _file.close();
+        return false;
+    }
+
     // 在 PSRAM 中分配索引表
     size_t indexSize = _header_1bpp.charCount * sizeof(CharIndex_1bpp);
     _index_1bpp = (CharIndex_1bpp*)heap_caps_malloc(indexSize, MALLOC_CAP_SPIRAM);
@@ -167,6 +217,12 @@ bool FontManager::loadGrayFont() {
         return false;
     }
     
+    if (strncmp(_header_gray.magic, "GRAY", 4) != 0 || _header_gray.charCount == 0) {
+        Serial.println("[Font] Invalid gray header");
+        _file.close();
+        return false;
+    }
+
     // 在 PSRAM 中分配索引表
     size_t indexSize = _header_gray.charCount * sizeof(CharIndex_gray);
     _index_gray = (CharIndex_gray*)heap_caps_malloc(indexSize, MALLOC_CAP_SPIRAM);
