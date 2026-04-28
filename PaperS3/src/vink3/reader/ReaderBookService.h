@@ -18,6 +18,8 @@ public:
     void renderOpenOrHelp();
     void renderCurrent();
     void renderTocPage(uint16_t page = 0);
+    bool nextPage();
+    bool prevPage();
     bool nextTocPage();
     bool prevTocPage();
     bool handleTap(int16_t x, int16_t y);
@@ -28,6 +30,7 @@ private:
     static constexpr int kTocEntriesPerPage = 13;
     static constexpr int16_t kTocFirstRowY = 128;
     static constexpr int16_t kTocRowH = 48;
+    static constexpr int kMaxChapterPages = 512;
 
     bool ensureTocBuffer();
     bool ensureSdReady();
@@ -37,7 +40,11 @@ private:
     void getTocCachePath(char* out, size_t len) const;
     bool loadTocCache();
     void saveTocCache();
+    bool buildChapterPages(int index);
+    bool renderCurrentReadingPage();
     bool renderChapterPreview(int index);
+    uint32_t chapterContentStart(int index);
+    uint32_t chapterEndOffset(int index);
     size_t trimUtf8Tail(char* text, size_t len) const;
 
     bool sdReady_ = false;
@@ -46,9 +53,12 @@ private:
     char activeTextPath_[160] = {0};
     char title_[72] = {0};
     ChapterDetectResult* toc_ = nullptr;
+    uint32_t* pageStarts_ = nullptr;
     int tocCount_ = 0;
     uint16_t tocPage_ = 0;
     int currentTocIndex_ = -1;
+    int pageCount_ = 0;
+    int currentPage_ = 0;
     bool showingToc_ = true;
 };
 

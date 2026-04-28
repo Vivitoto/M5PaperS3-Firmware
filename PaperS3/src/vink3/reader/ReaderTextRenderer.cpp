@@ -272,6 +272,47 @@ size_t ReaderTextRenderer::findWrapBreak(const char* text, size_t start, int16_t
     return len;
 }
 
+size_t ReaderTextRenderer::measurePageBytes(const char* text, size_t len, const ReaderRenderOptions& options) const {
+    if (!text || len == 0) return 0;
+    size_t pos = 0;
+    int16_t y = options.marginTop;
+    const int16_t maxWidth = kPaperS3Width - options.marginLeft - options.marginRight;
+    const int16_t lineHeight = fontSize() + options.lineGap;
+    const int16_t bottom = kPaperS3Height - options.marginBottom;
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(text);
+
+    while (pos < len && y + lineHeight < bottom) {
+        while (pos < len && (text[pos] == '\n' || text[pos] == '\r')) pos++;
+        if (pos >= len) break;
+
+        const size_t lineStart = pos;
+        size_t lastGood = pos;
+        int16_t width = 0;
+        while (pos < len) {
+            const size_t before = pos;
+            uint32_t ch = decodeUtf8(bytes, pos, len);
+            if (ch == '\n' || ch == '\r') {
+                pos = before;
+                break;
+            }
+            const uint8_t adv = charAdvance(ch);
+            if (width + adv > maxWidth) {
+                pos = lastGood > lineStart ? lastGood : pos;
+                break;
+            }
+            width += adv;
+            lastGood = pos;
+        }
+        if (pos <= lineStart) {
+            size_t force = lineStart;
+            decodeUtf8(bytes, force, len);
+            pos = force > lineStart ? force : lineStart + 1;
+        }
+        y += lineHeight;
+    }
+    return pos;
+}
+
 void ReaderTextRenderer::renderTextPage(const char* title, const char* body, uint16_t page, uint16_t totalPages, const ReaderRenderOptions& options) {
     if (!canvas_) return;
     if (!ready()) loadDefaultFont();

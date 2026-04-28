@@ -160,7 +160,7 @@ void StateMachine::handle(const Message& message) {
 
         case MessageType::SwipeLeft:
             if (state_ == SystemState::ReaderMenu) {
-                if (g_readerBook.nextTocPage()) g_displayService.enqueueFull(false, 100);
+                if (g_readerBook.nextPage()) g_displayService.enqueueFull(false, 100);
                 break;
             }
             if (state_ == SystemState::Reader) state_ = SystemState::Library;
@@ -172,7 +172,7 @@ void StateMachine::handle(const Message& message) {
 
         case MessageType::SwipeRight:
             if (state_ == SystemState::ReaderMenu) {
-                if (g_readerBook.prevTocPage()) g_displayService.enqueueFull(false, 100);
+                if (g_readerBook.prevPage()) g_displayService.enqueueFull(false, 100);
                 break;
             }
             if (state_ == SystemState::Settings) state_ = SystemState::Transfer;
@@ -183,13 +183,13 @@ void StateMachine::handle(const Message& message) {
             break;
 
         case MessageType::SwipeUp:
-            if (state_ == SystemState::ReaderMenu && g_readerBook.nextTocPage()) {
+            if (state_ == SystemState::ReaderMenu && g_readerBook.nextPage()) {
                 g_displayService.enqueueFull(false, 100);
             }
             break;
 
         case MessageType::SwipeDown:
-            if (state_ == SystemState::ReaderMenu && g_readerBook.prevTocPage()) {
+            if (state_ == SystemState::ReaderMenu && g_readerBook.prevPage()) {
                 g_displayService.enqueueFull(false, 100);
             }
             break;

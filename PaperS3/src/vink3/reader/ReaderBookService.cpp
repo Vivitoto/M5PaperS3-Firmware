@@ -10,6 +10,10 @@ ReaderBookService g_readerBook;
 
 bool ReaderBookService::begin() {
     ensureTocBuffer();
+    if (!pageStarts_) {
+        pageStarts_ = static_cast<uint32_t*>(heap_caps_calloc(kMaxChapterPages, sizeof(uint32_t), MALLOC_CAP_SPIRAM));
+        if (!pageStarts_) pageStarts_ = static_cast<uint32_t*>(calloc(kMaxChapterPages, sizeof(uint32_t)));
+    }
     ensureSdReady();
     return true;
 }
@@ -50,6 +54,8 @@ void ReaderBookService::closeCurrent() {
     tocCount_ = 0;
     tocPage_ = 0;
     currentTocIndex_ = -1;
+    pageCount_ = 0;
+    currentPage_ = 0;
     showingToc_ = true;
     bookPath_[0] = '\0';
     activeTextPath_[0] = '\0';
@@ -217,6 +223,20 @@ void ReaderBookService::renderCurrent() {
     }
 }
 
+bool ReaderBookService::nextPage() {
+    if (showingToc_) return nextTocPage();
+    if (!open_ || pageCount_ <= 0 || currentPage_ + 1 >= pageCount_) return false;
+    currentPage_++;
+    return renderCurrentReadingPage();
+}
+
+bool ReaderBookService::prevPage() {
+    if (showingToc_) return prevTocPage();
+    if (!open_ || pageCount_ <= 0 || currentPage_ <= 0) return false;
+    currentPage_--;
+    return renderCurrentReadingPage();
+}
+
 bool ReaderBookService::nextTocPage() {
     if (!open_ || !showingToc_ || tocCount_ <= 0) return false;
     const uint16_t totalPages = (tocCount_ + kTocEntriesPerPage - 1) / kTocEntriesPerPage;
@@ -255,8 +275,10 @@ bool ReaderBookService::handleTap(int16_t x, int16_t y) {
 bool ReaderBookService::openTocEntry(int index) {
     if (index < 0 || index >= tocCount_) return false;
     currentTocIndex_ = index;
+    currentPage_ = 0;
     showingToc_ = false;
-    return renderChapterPreview(index);
+    if (!buildChapterPages(index)) return renderChapterPreview(index);
+    return renderCurrentReadingPage();
 }
 
 void ReaderBookService::renderTocPage(uint16_t page) {
@@ -299,6 +321,93 @@ size_t ReaderBookService::trimUtf8Tail(char* text, size_t len) const {
     }
     text[len] = '\0';
     return len;
+}
+
+uint32_t ReaderBookService::chapterContentStart(int index) {
+    if (index < 0 || index >= tocCount_ || !activeTextPath_[0]) return 0;
+    File f = SD.open(activeTextPath_, FILE_READ);
+    if (!f) return toc_[index].charOffset;
+    uint32_t start = toc_[index].charOffset;
+    if (!f.seek(start)) {
+        f.close();
+        return start;
+    }
+    while (f.available()) {
+        char c = f.read();
+        start++;
+        if (c == '\n') break;
+    }
+    while (f.available()) {
+        int c = f.peek();
+        if (c == '\r' || c == '\n' || c == ' ' || c == '\t') {
+            f.read();
+            start++;
+            continue;
+        }
+        break;
+    }
+    f.close();
+    return start;
+}
+
+uint32_t ReaderBookService::chapterEndOffset(int index) {
+    if (index + 1 < tocCount_) return toc_[index + 1].charOffset;
+    File f = SD.open(activeTextPath_, FILE_READ);
+    if (!f) return 0;
+    uint32_t size = f.size();
+    f.close();
+    return size;
+}
+
+bool ReaderBookService::buildChapterPages(int index) {
+    if (index < 0 || index >= tocCount_ || !activeTextPath_[0] || !pageStarts_) return false;
+    const uint32_t start = chapterContentStart(index);
+    const uint32_t end = chapterEndOffset(index);
+    if (end <= start) return false;
+    File f = SD.open(activeTextPath_, FILE_READ);
+    if (!f) return false;
+
+    uint32_t offset = start;
+    pageCount_ = 0;
+    while (offset < end && pageCount_ < kMaxChapterPages) {
+        pageStarts_[pageCount_++] = offset;
+        if (!f.seek(offset)) break;
+        const uint32_t toRead = min<uint32_t>(4095, end - offset);
+        char buf[4096];
+        int n = f.read(reinterpret_cast<uint8_t*>(buf), toRead);
+        if (n <= 0) break;
+        size_t len = trimUtf8Tail(buf, static_cast<size_t>(n));
+        size_t consumed = g_readerText.measurePageBytes(buf, len);
+        if (consumed == 0) consumed = len;
+        if (consumed == 0) break;
+        offset += consumed;
+    }
+    f.close();
+    currentPage_ = 0;
+    Serial.printf("[vink3][book] chapter pages built: toc=%d pages=%d\n", index, pageCount_);
+    return pageCount_ > 0;
+}
+
+bool ReaderBookService::renderCurrentReadingPage() {
+    if (currentTocIndex_ < 0 || currentTocIndex_ >= tocCount_ || pageCount_ <= 0 || !pageStarts_) return false;
+    const uint32_t start = pageStarts_[currentPage_];
+    const uint32_t end = (currentPage_ + 1 < pageCount_) ? pageStarts_[currentPage_ + 1] : chapterEndOffset(currentTocIndex_);
+    if (end <= start) return false;
+    File f = SD.open(activeTextPath_, FILE_READ);
+    if (!f || !f.seek(start)) {
+        if (f) f.close();
+        return false;
+    }
+    const uint32_t toRead = min<uint32_t>(4095, end - start);
+    char body[4096];
+    int n = f.read(reinterpret_cast<uint8_t*>(body), toRead);
+    f.close();
+    if (n <= 0) return false;
+    trimUtf8Tail(body, static_cast<size_t>(n));
+    char header[96];
+    snprintf(header, sizeof(header), "%03d %s", currentTocIndex_ + 1, toc_[currentTocIndex_].title.c_str());
+    g_readerText.renderTextPage(header, body, currentPage_ + 1, pageCount_);
+    return true;
 }
 
 bool ReaderBookService::renderChapterPreview(int index) {

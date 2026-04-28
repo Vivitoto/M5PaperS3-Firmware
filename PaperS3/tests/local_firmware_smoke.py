@@ -152,6 +152,8 @@ def vink3_source_invariants(main_cpp: str) -> None:
     assert_contains(reader_book_cpp, "TextCodec::convertToUTF8", "reader book service converts GBK TXT before TOC detection")
     assert_contains(reader_book_cpp, ".vink-toc", "reader book service stores TOC cache beside the source book")
     assert_contains(reader_book_cpp, "nextTocPage", "reader book service supports TOC paging")
+    assert_contains(reader_book_cpp, "buildChapterPages", "reader book service builds chapter page tables")
+    assert_contains(reader_cpp, "measurePageBytes", "reader text renderer exposes page-fit measurement")
     assert_contains(reader_book_cpp, "openTocEntry", "reader book service can open a TOC entry preview")
     assert_contains(state_cpp, "SystemState::ReaderMenu", "state machine routes reader menu interactions")
     assert_contains(full_font_h, "g_readpaper_full_font_data", "v0.3 full ReadPaper font is compiled as PROGMEM")
