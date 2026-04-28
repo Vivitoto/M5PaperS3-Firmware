@@ -64,6 +64,7 @@ def iter_lines_with_offsets(text: str):
 def detect_toc(text: str, max_entries: int = 2000) -> list[dict]:
     entries: list[dict] = []
     last_offset = -10**9
+    last_number: int | None = None
     for char_offset, line in iter_lines_with_offsets(text):
         stripped = line.strip(" \t\u3000")
         if not stripped or len(stripped) > 90:
@@ -87,6 +88,16 @@ def detect_toc(text: str, max_entries: int = 2000) -> list[dict]:
         if number is None or number <= 0:
             continue
         entry_type = "volume" if kind in {"卷", "部", "集", "篇"} else "chapter"
+        # Avoid duplicate/mislabeled web TXT headings before applying the dense-line
+        # guard; otherwise a duplicate "...免费阅读" heading can hide the real next
+        # chapter that follows only a few lines later.
+        if entry_type == "chapter" and last_number is not None:
+            if number == last_number:
+                continue
+            if number > last_number + 50:
+                continue
+            if number < last_number and last_number - number < 50:
+                continue
         # Avoid dense false positives inside prose/code blocks, but allow a chapter
         # immediately after a volume heading (common TXT layout: 卷标题, blank, 第一章).
         if entries and char_offset - last_offset < 80 and entries[-1]["type"] != "volume":
@@ -103,6 +114,8 @@ def detect_toc(text: str, max_entries: int = 2000) -> list[dict]:
             "score": score,
         })
         last_offset = char_offset
+        if entry_type == "chapter":
+            last_number = number
         if len(entries) >= max_entries:
             break
     return entries

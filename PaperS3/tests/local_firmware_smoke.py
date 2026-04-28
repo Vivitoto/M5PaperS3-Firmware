@@ -173,7 +173,10 @@ def vink3_source_invariants(main_cpp: str) -> None:
     assert_contains(gbk_table_h, "gbkToUnicode", "v0.3 includes full ReadPaper-derived GBK Unicode lookup")
     assert_contains(codec_cpp, "vink3::gbkToUnicode", "TextCodec uses full GBK lookup before legacy table")
     assert_contains(chapter_cpp, "U'四'", "chapter detector parses full Chinese numerals")
+    assert_contains(chapter_cpp, "lastChapterNumber", "chapter detector suppresses duplicate/outlier chapter headings")
+    assert_contains(chapter_cpp, "免费阅读", "chapter detector documents web TXT duplicate heading cleanup")
     assert_contains(chapter_cpp, "0xE3", "chapter detector trims ideographic leading spaces")
+    assert_contains(toc_tool, "last_number", "host TXT TOC detector suppresses duplicate/outlier chapter headings")
     assert_contains(toc_tool, "detect_toc", "host TXT TOC detector exists for large novel validation")
     assert_not_contains(ui_cpp, "drawString", "v0.3 UI renderer must not use M5GFX drawString for Chinese")
 
