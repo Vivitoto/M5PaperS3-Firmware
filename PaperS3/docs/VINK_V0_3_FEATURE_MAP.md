@@ -136,6 +136,16 @@ Progress payload uses `BookProgress.kt`:
 }
 ```
 
+Legado HTTP responses are wrapped:
+
+```json
+{
+  "isSuccess": true,
+  "errorMsg": "",
+  "data": {}
+}
+```
+
 Vink UI shape:
 
 - Legado connection card: host/port/status.
@@ -149,7 +159,7 @@ Implementation notes:
 
 - State handlers: `handleTransfer()`, `handleLegadoSync()`, `handleWifiUpload()`, `handleUsbMsc()`, `handleWebDav()`.
 - USB MSC should be a modal/confirm state, not a casual toggle. It needs SD access quiescence like ReadPaper.
-- Legado is not WebDAV. Treat it as Android app HTTP service on LAN, usually port `1234` for HTTP and `1235` for websocket debug/search.
+- Legado is not WebDAV. Treat it as Android app HTTP service on LAN. The current Legado source defaults HTTP WebService to port `1122`; websocket/debug/search is HTTP port + 1, normally `1123`. Older docs/examples may show `1234`/`1235`, so Vink should let the user configure the port.
 
 ### 4. Settings tab
 
@@ -197,7 +207,7 @@ Decision: Put under Transfer, but require a confirm/modal state and stop reader/
 
 ### Legado book identity
 
-Problem: Legado progress save uses `name + author + durChapterIndex + durChapterPos + durChapterTime + durChapterTitle`, while `getBookshelf` books also have `bookUrl`. For local Vink books, matching by only name/author can collide.
+Problem: Legado progress save identifies the target book by `name + author`, while `getBookshelf` books also have a stable `bookUrl` used for chapter/content APIs. For local Vink books, matching by only name/author can collide.
 
 Decision: Store a local mapping:
 
@@ -207,6 +217,12 @@ Vink local book path/hash -> Legado bookUrl + name + author
 
 If mapping is missing, ask user to pair/select once.
 
+### Legado progress conflict behavior
+
+Problem: `/saveBookProgress` blindly accepts the posted progress for the matched `name + author`. If Legado's WebDAV progress sync is enabled, it can upload that value too. A stale PaperS3 progress post can overwrite newer phone progress.
+
+Decision: Vink should pull current shelf/progress first, compare chapter index/position, and only push automatically if local progress is clearly ahead. If uncertain, show a conflict status instead of overwriting.
+
 ### Legado remote content vs local reading
 
 Options:
@@ -214,7 +230,7 @@ Options:
 1. Use Legado only for bookshelf/progress sync, keep local files as source of truth.
 2. Stream chapters from Legado via `/getBookContent` and cache them locally.
 
-Recommendation: start with option 1 for v0.3.0; add remote-content reading later.
+Recommendation: start with option 1 for v0.3.0; add remote-content reading later. If remote reading is added, use `bookUrl` as ID and remember that `/getBookContent` can trigger phone-side source/network fetches.
 
 ### ReadPaper UI effects / shutter effects
 
