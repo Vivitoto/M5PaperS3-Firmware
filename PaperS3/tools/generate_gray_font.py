@@ -129,10 +129,10 @@ def render_char_gray(face, char, size):
     return bytes(bitmap_4bpp), width, height, advance, bearing_x, bearing_y
 
 
-def generate_gray_font(input_path, output_path, size, chars):
+def generate_gray_font(input_path, output_path, size, chars, face_index=0):
     """生成 4bpp 灰度字库文件"""
-    print(f"加载字体: {input_path}")
-    face = freetype.Face(input_path)
+    print(f"加载字体: {input_path} (face index {face_index})")
+    face = freetype.Face(input_path, face_index)
     
     print(f"字体信息:")
     family_name = face.family_name.decode('utf-8') if face.family_name else "Unknown"
@@ -228,6 +228,7 @@ def generate_gray_font(input_path, output_path, size, chars):
         'fontFamily': face.family_name.decode('utf-8') if face.family_name else "Unknown",
         'fontStyle': face.style_name.decode('utf-8') if face.style_name else "Regular",
         'sourceFile': os.path.basename(input_path),
+        'faceIndex': face_index,
         'generatedBy': 'generate_gray_font.py'
     }
     with open(meta_path, 'w', encoding='utf-8') as f:
@@ -266,6 +267,7 @@ def main():
     parser.add_argument('--output', '-o', required=True, help='输出 .fnt 字库文件')
     parser.add_argument('--size', '-s', type=int, default=24, help='字号（像素高度，默认24）')
     parser.add_argument('--chars', '-c', default='', help='字符列表文件（UTF-8，每行字符）')
+    parser.add_argument('--face-index', type=int, default=0, help='TTC 字体 face index；Noto Sans CJK SC 为 2')
     
     args = parser.parse_args()
     
@@ -274,7 +276,7 @@ def main():
         exit(1)
     
     chars = load_chars(args.chars) if args.chars else load_chars(None)
-    generate_gray_font(args.input, args.output, args.size, chars)
+    generate_gray_font(args.input, args.output, args.size, chars, args.face_index)
 
 
 if __name__ == '__main__':

@@ -5,11 +5,37 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v0.2.12",
+      "name": "Vink-PaperS3 v0.2.12 触控与残影优化",
+      "summary": "优化 v0.2.11 触控慢、残影重和排版挤压；基于 540×960 预览器统一全页面布局，修正 Tab 文字垂直对齐，并明确 UI 字库使用简体中文 SC 字形。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.2.12",
+      "changelog": "## Vink-PaperS3 v0.2.12 触控与残影优化\n\n### 触控响应优化\n- 修复切换 Tab 时触控反应明显变慢的问题。\n- Shell 页面提交时不再每次强制 `waitDisplay()` 阻塞到电子纸完全刷新结束，减少点击后的卡顿感。\n- 保持整页离屏 `M5Canvas` 渲染，页面内容仍是一整页一起提交，不再逐字刷新。\n\n### 残影优化\n- Shell UI 默认刷新从 `epd_fastest` 调整为更干净的 `epd_fast`，降低页面残留。\n- Shell quality 全清频率从每 20 次提高到每 6 次，减少多次切页后的灰影累积。\n\n### Crosslink 视觉继续贴近\n- 阅读首页保持紧凑 dashboard：当前书主卡、最近书籍四宫格、阅读统计三卡、底部快捷胶囊。\n- 空书架保持 3×2 书封占位网格 + 紧凑导入卡。\n- 传输页改为 2×3 功能卡片网格，减少长文字和右侧开关挤压。\n\n### 沿用修复\n- UI 固定使用固件内置字体，SD 字体只影响阅读正文切换。\n- 顶部状态栏显示系统时间，并对齐电量百分比和图标。\n- 保持 PaperS3 rotation 0 实机方向和 Crosslink 风格 UI。\n\n### UI 排版拥挤修复\n- 不再通过继续缩小字号解决拥挤；UI 固定内置字体保持可读大小。\n- 设置页从单个大面板改成 4 个分组卡片：阅读、版式、连接、系统，每组 2 行，底部不再压线。\n- 设置页关于项右侧只显示 `v0.2.12`，避免长版本名挤出卡片。\n- 顶部 Tab 的图标、标签、选中底色重新收紧，减少标签文字和图标互相挤压。\n- 阅读页底部快捷按钮缩短文案并降低高度，减少按钮和正文区域挤压。\n- 传输页功能卡片高度、开关、状态按钮重新收紧。\n\n### 设置页结构重排\n- 设置页点击区域按新的分组卡片布局重新计算，避免显示和触控区域不一致。\n- WiFi/Legado/休眠/关于等项目不再堆到外框底部。\n\n### 全屏空间利用修复\n- 设置页改为 full-height 分组卡片，4 个卡片纵向吃满 PaperS3 高度。\n- 设置项不再把标题和值挤在同一行；普通值放到第二行，分段选项使用更宽的横向胶囊。\n- 关于项显示 `Vink-PaperS3 / v0.2.12`，利用第二行展示而不是右侧硬塞。\n- 设置页触控命中区域同步改为新的大卡片/大行距布局。\n\n### 预览器回写\n- 新增本地 540×960 Pillow 预览器，先在桌面渲染阅读/书架/传输/设置四页再回写固件布局。\n- 阅读首页改为更充分利用纵向空间：当前书主卡、最近书籍 2×3 网格、统计卡和快捷按钮。\n- 空书架改为 3×3 书封占位网格 + 底部导入卡，避免下半屏空白。\n\n### 控件几何对齐\n- 继续全局梳理各层级 UI 控件对齐：图标现在绘制在固定 30×30 icon slot 内，卡片标题使用 icon+label 统一基线。\n- Tab 图标和文字现在作为一个整体按 Tab 胶囊宽度居中，不再靠手工偏移。\n- `drawUiTextCentered()` 增加灰度字形光学居中补偿，改善按钮文字垂直偏下的问题。\n- 开关控件重新按轨道高度、内边距和圆点直径计算，圆点上下居中。\n- 预览器同步加入 centered text / pill button / switch 几何辅助函数，后续先在预览中检查控件对齐。\n\n### 全层级对齐复查\n- 新增 `drawIconLabel()`，图标统一按 30×30 槽位光学居中，文字按同一槽位垂直中线对齐。\n- 传输页网络状态、功能卡标题、阅读统计卡、书架空状态等图标+文字组合改为统一对齐函数。\n- 返回页头 `<`、标题、提示线重新按固定高度对齐。\n- 阅读弹出菜单、页码跳转键盘、章节目录、书签列表改为统一卡片/居中规则。\n- WiFi传书、WiFi配置、Legado同步、阅读统计等二级页改为卡片行布局，避免旧 `setCursor/print` 固定坐标造成偏移。\n- 阅读器中心点击现在进入新 `READER_MENU` 视觉菜单，不再走旧菜单页面。\n\n### 细节继续打磨\n- 清理旧 `handleFileBrowser` / `handleMenu` / 旧章节、书签、排版、残影菜单入口，兼容入口全部转到新版卡片/居中 UI，避免旧 `setCursor/print` 页面被意外打开。\n- 新增右对齐文字辅助，主 Tab 顶部右侧状态、数量、提示不再使用固定像素偏移。\n- 排版设置和字体页面的“当前”标记改到右侧对齐，去掉 `*` 前缀造成的视觉缩进。\n- 阅读统计卡片里的数值和单位按文本实际宽度排布，避免单位靠固定坐标漂移。\n- 图标体系继续补齐：clock / send / settings 不再共用默认占位图标，保持每个功能卡图标语义和视觉中心一致。\n\n### 图标系统统一\n- 新增统一 `drawSlotIcon()`：所有 UI 图标都先占用 30×30 slot，内部绘制 22~24px 图形，避免 Tab 图标一大一小、一高一矮。\n- Tab 图标改为同一套 slot icon，不再在 `renderTopTabs()` 里分别手写不同尺寸的书本/书架/传输/设置图形。\n- 书本、书架、传输、设置、WiFi、统计、时钟图标统一线宽和视觉重量。\n- 预览器同步改为统一 30×30 icon slot，并重新生成 2x 高清短图预览。\n\n### 简体中文字形与 Tab 对齐修复\n- 预览器明确使用 Noto Sans CJK SC（TTC face index 2），避免默认 index 0 的 JP 字形导致共享汉字看起来像日/繁体。\n- 固件内置 UI 字库重新从 Noto Sans CJK SC face index 2 生成，`wenkai16/20/24_gray` 元数据现在标记为 `fontFamily: Noto Sans CJK SC`、`faceIndex: 2`。\n- Tab 胶囊内文字改为按同一 32px 高度垂直居中，不再在图标统一后出现文字基线不齐。\n- 系统 UI 文案继续保持简体中文；SD 字体仍只影响阅读正文，不影响 Shell UI。\n\n### 烧录包\n- Vink Flasher 默认使用 `full` 完整 16MB 镜像，从 `0x0` 写入。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v0.2.12-touch-ghosting-fix-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.12/Vink-PaperS3-v0.2.12-touch-ghosting-fix-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        },
+        "ota": {
+          "name": "Vink-PaperS3-v0.2.12-touch-ghosting-fix-ota.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.12/Vink-PaperS3-v0.2.12-touch-ghosting-fix-ota.bin",
+          "size": 1897808,
+          "flashOffset": 65536
+        },
+        "spiffs": {
+          "name": "Vink-PaperS3-v0.2.12-touch-ghosting-fix-spiffs.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.2.12/Vink-PaperS3-v0.2.12-touch-ghosting-fix-spiffs.bin",
+          "size": 4128768
+        }
+      }
+    },
+    {
       "version": "v0.2.11",
       "name": "Vink-PaperS3 v0.2.11 整页刷新修复",
-      "summary": "修复 UI 文字逐字刷新、切换 Tab 后文字消失，并进一步贴近 Crosslink/小红书参考：更紧凑阅读首页、最近书籍缩略图、空书架网格、固定内置 UI 字体、时间状态栏和区分化 Tab 图标。",
+      "summary": "修复 UI 文字逐字刷新、切换 Tab 后文字消失，并进一步贴近 Crosslink/小红书参考：更紧凑阅读首页、最近书籍缩略图、空书架网格、传输页 2×3 功能卡片、固定内置 UI 字体和时间状态栏。",
       "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.2.11",
-      "changelog": "## Vink-PaperS3 v0.2.11 整页刷新修复\n\n### 整页刷新修复\n- 修复第一页文字“一个一个刷出来”的问题。\n- 修复点击其他 Tab 后文字消失、再回第一页文字也消失的问题。\n- Shell UI 现在先绘制到内存 `M5Canvas`，包括边框、图标和中文 glyph；页面完成后再一次性 `pushSprite()` 到 PaperS3。\n- `UITheme` 新增可切换绘制目标，Shell 绘制期间所有主题组件都画到同一个离屏 Canvas。\n- 避免中文 glyph 直接逐点写入电子纸面板导致的逐字刷新和后续 framebuffer 丢字。\n\n### UI 字体策略\n- UI 固定使用固件内置 SPIFFS 字体，不读取 SD 卡字体。\n- 阅读正文仍使用独立阅读字体对象，后续只有阅读内容才涉及字体切换。\n- 保留字体头校验，旧/坏字体不会再被误判为可用。\n\n### 顶部状态栏\n- 顶部左侧由 `Vink e-reader` 改为系统时间。\n- 电池百分比和电池图标重新对齐，减轻顶部通知栏拥挤。\n- 书架 Tab 改为书架/书脊图标，和阅读 Tab 的打开书图标区分。\n- 设置 Tab 改为更接近齿轮的线框图标。\n\n### 沿用 v0.2.9 修复\n- 保持 Crosslink 风格 UI。\n- 保持 PaperS3 rotation 0 实机方向。\n- 保持触摸状态机、Tab 点击区域、阅读进度同步、Shell 刷新调度等硬件联动修复。\n\n### Crosslink 视觉密度调整\n- 阅读首页改为更接近参考图的密集 dashboard：当前书籍主卡、最近书籍四宫格、阅读统计三卡、底部快捷胶囊。\n- 空书架不再显示大面积空白，改为 3×2 书封占位网格 + 紧凑导入操作卡。\n- 继续保持小红书 Crosslink 风格的线框卡片、紧凑分区和轻量图标。\n\n### 烧录包\n- Vink Flasher 默认使用 `full` 完整 16MB 镜像，从 `0x0` 写入。",
+      "changelog": "## Vink-PaperS3 v0.2.11 整页刷新修复\n\n### 整页刷新修复\n- 修复第一页文字“一个一个刷出来”的问题。\n- 修复点击其他 Tab 后文字消失、再回第一页文字也消失的问题。\n- Shell UI 现在先绘制到内存 `M5Canvas`，包括边框、图标和中文 glyph；页面完成后再一次性 `pushSprite()` 到 PaperS3。\n- `UITheme` 新增可切换绘制目标，Shell 绘制期间所有主题组件都画到同一个离屏 Canvas。\n- 避免中文 glyph 直接逐点写入电子纸面板导致的逐字刷新和后续 framebuffer 丢字。\n\n### UI 字体策略\n- UI 固定使用固件内置 SPIFFS 字体，不读取 SD 卡字体。\n- 阅读正文仍使用独立阅读字体对象，后续只有阅读内容才涉及字体切换。\n- 保留字体头校验，旧/坏字体不会再被误判为可用。\n\n### 顶部状态栏\n- 顶部左侧由 `Vink e-reader` 改为系统时间。\n- 电池百分比和电池图标重新对齐，减轻顶部通知栏拥挤。\n- 书架 Tab 改为书架/书脊图标，和阅读 Tab 的打开书图标区分。\n- 设置 Tab 改为更接近齿轮的线框图标。\n\n### 沿用 v0.2.9 修复\n- 保持 Crosslink 风格 UI。\n- 保持 PaperS3 rotation 0 实机方向。\n- 保持触摸状态机、Tab 点击区域、阅读进度同步、Shell 刷新调度等硬件联动修复。\n\n### Crosslink 视觉密度调整\n- 阅读首页改为更接近参考图的密集 dashboard：当前书籍主卡、最近书籍四宫格、阅读统计三卡、底部快捷胶囊。\n- 空书架不再显示大面积空白，改为 3×2 书封占位网格 + 紧凑导入操作卡。\n- 继续保持小红书 Crosslink 风格的线框卡片、紧凑分区和轻量图标。\n- 传输页改为 2×3 功能卡片网格，减少长文字和右侧开关挤压。\n\n### 烧录包\n- Vink Flasher 默认使用 `full` 完整 16MB 镜像，从 `0x0` 写入。",
       "assets": {
         "full": {
           "name": "Vink-PaperS3-v0.2.11-canvas-refresh-fix-full-16MB.bin",
