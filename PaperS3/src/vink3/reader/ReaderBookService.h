@@ -37,9 +37,16 @@ private:
     bool isTxtPath(const char* name) const;
     void closeCurrent();
     void setTitleFromPath(const char* path);
+    void getSidecarPath(char* out, size_t len, const char* suffix) const;
     void getTocCachePath(char* out, size_t len) const;
+    void getProgressPath(char* out, size_t len) const;
+    void getPageCachePath(char* out, size_t len) const;
     bool loadTocCache();
     void saveTocCache();
+    bool loadProgress();
+    void saveProgress();
+    bool loadChapterPageCache(int index, uint32_t start, uint32_t end);
+    void saveChapterPageCache(int index, uint32_t start, uint32_t end);
     bool buildChapterPages(int index);
     bool renderCurrentReadingPage();
     bool renderChapterPreview(int index);

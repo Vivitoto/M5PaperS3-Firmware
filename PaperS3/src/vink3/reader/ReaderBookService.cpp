@@ -70,18 +70,30 @@ void ReaderBookService::setTitleFromPath(const char* path) {
     if (dot) *dot = '\0';
 }
 
-void ReaderBookService::getTocCachePath(char* out, size_t len) const {
-    // Keep generated TOC next to the book for easier file management:
-    //   /books/foo.txt -> /books/foo.vink-toc
+void ReaderBookService::getSidecarPath(char* out, size_t len, const char* suffix) const {
+    // Keep generated metadata next to the book for easier file management:
+    //   /books/foo.txt -> /books/foo.vink-toc / foo.vink-progress / foo.vink-pages
     // Use the original book path, not the temporary UTF-8 conversion path.
     strlcpy(out, bookPath_, len);
     char* slash = strrchr(out, '/');
     char* dot = strrchr(out, '.');
     if (dot && (!slash || dot > slash)) {
-        strlcpy(dot, ".vink-toc", len - static_cast<size_t>(dot - out));
+        strlcpy(dot, suffix, len - static_cast<size_t>(dot - out));
     } else {
-        strlcat(out, ".vink-toc", len);
+        strlcat(out, suffix, len);
     }
+}
+
+void ReaderBookService::getTocCachePath(char* out, size_t len) const {
+    getSidecarPath(out, len, ".vink-toc");
+}
+
+void ReaderBookService::getProgressPath(char* out, size_t len) const {
+    getSidecarPath(out, len, ".vink-progress");
+}
+
+void ReaderBookService::getPageCachePath(char* out, size_t len) const {
+    getSidecarPath(out, len, ".vink-pages");
 }
 
 bool ReaderBookService::loadTocCache() {
@@ -143,6 +155,92 @@ void ReaderBookService::saveTocCache() {
     Serial.printf("[vink3][book] TOC cache saved: %s (%d entries)\n", cachePath, tocCount_);
 }
 
+bool ReaderBookService::loadProgress() {
+    if (!bookPath_[0] || !ensureSdReady()) return false;
+    char path[96];
+    getProgressPath(path, sizeof(path));
+    File f = SD.open(path, FILE_READ);
+    if (!f) return false;
+    uint32_t magic = 0;
+    uint16_t chapter = 0;
+    uint16_t page = 0;
+    f.read(reinterpret_cast<uint8_t*>(&magic), sizeof(magic));
+    f.read(reinterpret_cast<uint8_t*>(&chapter), sizeof(chapter));
+    f.read(reinterpret_cast<uint8_t*>(&page), sizeof(page));
+    f.close();
+    if (magic != 0x56505231UL || chapter >= tocCount_) return false; // VPR1
+    if (!buildChapterPages(chapter)) return false;
+    currentTocIndex_ = chapter;
+    currentPage_ = page < pageCount_ ? page : 0;
+    showingToc_ = false;
+    Serial.printf("[vink3][book] progress loaded: chapter=%u page=%u\n", chapter, page);
+    return true;
+}
+
+void ReaderBookService::saveProgress() {
+    if (!bookPath_[0] || currentTocIndex_ < 0 || !ensureSdReady()) return;
+    char path[96];
+    getProgressPath(path, sizeof(path));
+    File f = SD.open(path, FILE_WRITE);
+    if (!f) return;
+    uint32_t magic = 0x56505231UL; // VPR1
+    uint16_t chapter = static_cast<uint16_t>(currentTocIndex_);
+    uint16_t page = static_cast<uint16_t>(max(0, currentPage_));
+    f.write(reinterpret_cast<const uint8_t*>(&magic), sizeof(magic));
+    f.write(reinterpret_cast<const uint8_t*>(&chapter), sizeof(chapter));
+    f.write(reinterpret_cast<const uint8_t*>(&page), sizeof(page));
+    f.close();
+}
+
+bool ReaderBookService::loadChapterPageCache(int index, uint32_t start, uint32_t end) {
+    if (!bookPath_[0] || !pageStarts_ || !ensureSdReady()) return false;
+    char path[96];
+    getPageCachePath(path, sizeof(path));
+    File f = SD.open(path, FILE_READ);
+    if (!f) return false;
+    uint32_t magic = 0;
+    uint16_t chapter = 0;
+    uint16_t count = 0;
+    uint32_t cachedStart = 0;
+    uint32_t cachedEnd = 0;
+    f.read(reinterpret_cast<uint8_t*>(&magic), sizeof(magic));
+    f.read(reinterpret_cast<uint8_t*>(&chapter), sizeof(chapter));
+    f.read(reinterpret_cast<uint8_t*>(&count), sizeof(count));
+    f.read(reinterpret_cast<uint8_t*>(&cachedStart), sizeof(cachedStart));
+    f.read(reinterpret_cast<uint8_t*>(&cachedEnd), sizeof(cachedEnd));
+    if (magic != 0x56504731UL || chapter != index || count == 0 || count > kMaxChapterPages || cachedStart != start || cachedEnd != end) {
+        f.close();
+        return false;
+    }
+    size_t need = static_cast<size_t>(count) * sizeof(uint32_t);
+    size_t got = f.read(reinterpret_cast<uint8_t*>(pageStarts_), need);
+    f.close();
+    if (got != need) return false;
+    pageCount_ = count;
+    currentPage_ = 0;
+    Serial.printf("[vink3][book] page cache loaded: chapter=%d pages=%d\n", index, pageCount_);
+    return true;
+}
+
+void ReaderBookService::saveChapterPageCache(int index, uint32_t start, uint32_t end) {
+    if (!bookPath_[0] || !pageStarts_ || pageCount_ <= 0 || !ensureSdReady()) return;
+    char path[96];
+    getPageCachePath(path, sizeof(path));
+    File f = SD.open(path, FILE_WRITE);
+    if (!f) return;
+    uint32_t magic = 0x56504731UL; // VPG1
+    uint16_t chapter = static_cast<uint16_t>(index);
+    uint16_t count = static_cast<uint16_t>(pageCount_);
+    f.write(reinterpret_cast<const uint8_t*>(&magic), sizeof(magic));
+    f.write(reinterpret_cast<const uint8_t*>(&chapter), sizeof(chapter));
+    f.write(reinterpret_cast<const uint8_t*>(&count), sizeof(count));
+    f.write(reinterpret_cast<const uint8_t*>(&start), sizeof(start));
+    f.write(reinterpret_cast<const uint8_t*>(&end), sizeof(end));
+    f.write(reinterpret_cast<const uint8_t*>(pageStarts_), static_cast<size_t>(pageCount_) * sizeof(uint32_t));
+    f.close();
+    Serial.printf("[vink3][book] page cache saved: chapter=%d pages=%d\n", index, pageCount_);
+}
+
 bool ReaderBookService::openFirstBook() {
     if (!ensureSdReady()) return false;
     File dir = SD.open(BOOKS_DIR);
@@ -193,6 +291,7 @@ bool ReaderBookService::openBook(const char* path) {
             saveTocCache();
         }
     }
+    loadProgress();
     return true;
 }
 
@@ -206,7 +305,7 @@ void ReaderBookService::renderOpenOrHelp() {
             1);
         return;
     }
-    renderTocPage(tocPage_);
+    renderCurrent();
 }
 
 void ReaderBookService::renderCurrent() {
@@ -225,16 +324,31 @@ void ReaderBookService::renderCurrent() {
 
 bool ReaderBookService::nextPage() {
     if (showingToc_) return nextTocPage();
-    if (!open_ || pageCount_ <= 0 || currentPage_ + 1 >= pageCount_) return false;
-    currentPage_++;
-    return renderCurrentReadingPage();
+    if (!open_ || pageCount_ <= 0) return false;
+    if (currentPage_ + 1 < pageCount_) {
+        currentPage_++;
+        return renderCurrentReadingPage();
+    }
+    if (currentTocIndex_ + 1 < tocCount_) {
+        return openTocEntry(currentTocIndex_ + 1);
+    }
+    return false;
 }
 
 bool ReaderBookService::prevPage() {
     if (showingToc_) return prevTocPage();
-    if (!open_ || pageCount_ <= 0 || currentPage_ <= 0) return false;
-    currentPage_--;
-    return renderCurrentReadingPage();
+    if (!open_ || pageCount_ <= 0) return false;
+    if (currentPage_ > 0) {
+        currentPage_--;
+        return renderCurrentReadingPage();
+    }
+    if (currentTocIndex_ > 0 && buildChapterPages(currentTocIndex_ - 1)) {
+        currentTocIndex_--;
+        currentPage_ = max(0, pageCount_ - 1);
+        showingToc_ = false;
+        return renderCurrentReadingPage();
+    }
+    return false;
 }
 
 bool ReaderBookService::nextTocPage() {
@@ -364,6 +478,7 @@ bool ReaderBookService::buildChapterPages(int index) {
     const uint32_t start = chapterContentStart(index);
     const uint32_t end = chapterEndOffset(index);
     if (end <= start) return false;
+    if (loadChapterPageCache(index, start, end)) return true;
     File f = SD.open(activeTextPath_, FILE_READ);
     if (!f) return false;
 
@@ -385,6 +500,7 @@ bool ReaderBookService::buildChapterPages(int index) {
     f.close();
     currentPage_ = 0;
     Serial.printf("[vink3][book] chapter pages built: toc=%d pages=%d\n", index, pageCount_);
+    if (pageCount_ > 0) saveChapterPageCache(index, start, end);
     return pageCount_ > 0;
 }
 
@@ -407,6 +523,7 @@ bool ReaderBookService::renderCurrentReadingPage() {
     char header[96];
     snprintf(header, sizeof(header), "%03d %s", currentTocIndex_ + 1, toc_[currentTocIndex_].title.c_str());
     g_readerText.renderTextPage(header, body, currentPage_ + 1, pageCount_);
+    saveProgress();
     return true;
 }
 
