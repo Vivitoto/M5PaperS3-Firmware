@@ -55,7 +55,7 @@ Vink adaptations:
 - Vink now refuses to push a mutable live canvas if the immutable display snapshot cannot be allocated; this avoids reintroducing render-vs-EPD races under PSRAM pressure.
 - Vink now includes an explicit physical 960x540 → logical 540x960 touch transform fallback tied to the runtime-selected active rotation, while still preserving raw coordinates for diagnosis.
 - Vink now implements the v0.3 side power-key path: boot press is ignored until release, a later stable press requests shutdown, current reader progress is saved, a shutdown page is refreshed, GPIO44 is pulsed, `M5.Power.powerOff()` is called, and deep sleep is only a fallback.
-- `oxflash.json` is aligned with the current `v0.3.2-rc` full-only 16MB image instead of the older `v1.2.0` entry.
+- `releases.json` is the single current firmware manifest consumed by Vink Flasher; the obsolete `oxflash.json` compatibility manifest was removed to avoid duplicate sources of truth.
 
 ## Remaining hardware-only validation
 

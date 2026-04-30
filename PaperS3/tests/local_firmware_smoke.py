@@ -5,9 +5,7 @@ This is not a PaperS3 hardware emulator. It is a deterministic local gate for
 things that repeatedly caused real-device regressions:
 
 - source-level display/touch invariants
-- no legacy direct FileBrowser render path from App
-- non-tab menu pages are dirty-gated instead of repainting every loop
-- transition touches wait for finger release
+- active src/ contains only the v0.3 runtime plus shared utilities
 - releases.json top asset sizes match existing release artifacts
 - optional PlatformIO build/buildfs/full-merge with full-image size checks
 """
@@ -67,48 +65,36 @@ def assert_not_contains(text: str, needle: str, label: str) -> None:
 
 def source_invariants() -> None:
     main_cpp = read("src/main.cpp")
-    if "vink3/runtime/VinkRuntime.h" in main_cpp:
-        return vink3_source_invariants(main_cpp)
+    assert_contains(main_cpp, "vink3/runtime/VinkRuntime.h", "firmware entrypoint uses the v0.3 runtime")
 
-    app = read("src/App.cpp")
-    app_h = read("src/App.h")
-    wifi = read("src/WiFiUploader.cpp")
+    removed_legacy = [
+        "App.cpp", "App.h",
+        "BlePageTurner.cpp", "BlePageTurner.h",
+        "EbookReader.cpp", "EbookReader.h",
+        "EpubParser.cpp", "EpubParser.h",
+        "FileBrowser.cpp", "FileBrowser.h",
+        "JsonHelper.h",
+        "LegadoSync.cpp", "LegadoSync.h",
+        "ReadingStats.cpp", "ReadingStats.h",
+        "RecentBooks.cpp", "RecentBooks.h",
+        "UITheme.cpp", "UITheme.h",
+        "WebDavClient.cpp", "WebDavClient.h",
+        "WiFiUploader.cpp", "WiFiUploader.h",
+        "ZipFile.cpp", "ZipFile.h",
+    ]
+    leftovers = [name for name in removed_legacy if (PROJECT / "src" / name).exists()]
+    if leftovers:
+        fail(f"obsolete v0.2 monolithic source files should not live in active src/: {', '.join(leftovers)}")
+    ok("obsolete v0.2 monolithic source files are removed from active src/")
+
+    platformio = read("platformio.ini")
+    assert_not_contains(platformio, "ElegantOTA", "unused legacy OTA dependency is not listed")
+    assert_not_contains(platformio, "ArduinoJson", "unused legacy JSON dependency is not listed")
+
     font = read("src/FontManager.cpp")
-
-    assert_contains(app, "static bool ensureShellCanvas()", "Shell canvas has an explicit ensure/prealloc helper")
-    assert_contains(app, "Shell canvas preallocation failed", "Shell canvas is preallocated during display init")
-    assert_contains(app, "_pageNeedsRender || _state != _lastRenderedState", "Non-tab shell pages are dirty-gated")
-    assert_contains(app_h, "bool _pageNeedsRender;", "App stores subpage dirty state")
-    assert_contains(app_h, "AppState _lastRenderedState;", "App tracks last rendered shell subpage")
-    assert_contains(app, "gLastShellCommitOk", "Shell commit success is tracked")
-    assert_contains(app_h, "bool _touchWaitRelease;", "Transition touch waits for release")
-    assert_contains(app, "touchCount > 0", "Touch suppressor waits until finger is lifted")
-    assert_contains(app, "_touchSuppressUntil = millis() + 180", "Tab/back transition cooldown exists")
-    assert_contains(app, "_touchSuppressUntil = millis() + 300", "Wake transition cooldown exists")
-    assert_contains(app, "if (!waitShellDisplayReady(3500))", "Shell commit is serialized before physical display")
-    assert_contains(app, "_tabNeedsRender[tab] = true;", "Toast/tab dirty invalidation exists")
-
-    assert_not_contains(app, "_browser.render(", "App does not call legacy FileBrowser direct render")
-    assert_not_contains(app, "commitTopTabsFeedback", "No top-tab partial refresh path remains")
-    assert_not_contains(wifi, "SPIFFS.begin(true", "WiFi uploader must not format SPIFFS on mount failure")
     assert_not_contains(font, "SPIFFS.begin(true", "Font manager must not format SPIFFS on mount failure")
 
-    # Keep direct display calls intentionally narrow.
-    display_lines = [
-        (i + 1, line.strip())
-        for i, line in enumerate(app.splitlines())
-        if "display.display" in line
-    ]
-    allowed_patterns = [
-        "display.display();",
-        "display.display(x - 6, y - 6, w + 12, h + 12);",
-        "display.display(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT);",
-        "display.displayBusy()",
-    ]
-    for line_no, line in display_lines:
-        if not any(p in line for p in allowed_patterns):
-            fail(f"unexpected display.display use at App.cpp:{line_no}: {line}")
-    ok(f"Direct display calls are limited to intended paths ({len(display_lines)} lines)")
+    return vink3_source_invariants(main_cpp)
 
 
 def vink3_source_invariants(main_cpp: str) -> None:
@@ -345,13 +331,12 @@ def json_valid() -> None:
     manifest = json.loads((PROJECT / "releases.json").read_text(encoding="utf-8"))
     ok("releases.json parses")
     version = manifest["releases"][0]["version"]
-    ox = json.loads((PROJECT / "oxflash.json").read_text(encoding="utf-8"))
-    top = ox[0]["versions"][0]
-    if version not in top.get("version", "") or top.get("size") != FULL_FLASH_SIZE:
-        fail(f"oxflash.json must point at the current {version} full-only 16MB image")
-    if "ota" in top.get("file", "").lower() or "spiffs" in top.get("file", "").lower():
-        fail("oxflash.json must not advertise OTA/SPIFFS artifacts")
-    ok("oxflash.json points at the current full-only RC image")
+    full = manifest["releases"][0].get("assets", {}).get("full", {})
+    if full.get("size") != FULL_FLASH_SIZE or full.get("flashOffset") != 0:
+        fail(f"releases.json must point at the current {version} full-only 16MB image at offset 0")
+    if not full.get("name", "").endswith("full-16MB.bin"):
+        fail("releases.json full asset must be the user-facing full 16MB image")
+    ok("releases.json points at the current full-only RC image")
 
 
 def build_all(slug: str) -> None:

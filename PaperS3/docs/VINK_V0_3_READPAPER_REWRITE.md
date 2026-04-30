@@ -213,10 +213,10 @@ Integration points:
 - `MSG_LEGADO_SYNC_FAILED`
 - Reader emits progress-save event to Legado service.
 
-Existing Vink references to reuse carefully:
+Current code structure:
 
-- `PaperS3/src/LegadoSync.*`
-- `PaperS3/src/WebDavClient.*` only if useful for HTTP pattern, not UI coupling.
+- v0.3 keeps a lightweight `src/vink3/sync/LegadoService.*` service boundary.
+- The old v0.2 `LegadoSync.*` / `WebDavClient.*` active-source files were removed from `src/`; future HTTP/WebDAV work should be rebuilt inside service boundaries instead of reviving UI-coupled legacy code.
 
 ### 8. Vink UI on top of ReadPaper core
 

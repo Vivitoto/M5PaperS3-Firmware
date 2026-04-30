@@ -371,7 +371,7 @@ Use this checklist when modifying Vink-PaperS3 firmware:
 
 2. **CJK text**
    - Shell UI Chinese must use `FontManager` drawing, not M5 built-in `print()`.
-   - Reader text can keep `EbookReader` font drawing path.
+   - Reader text should stay on the v0.3 `ReaderTextRenderer` / `CjkTextRenderer` path; the old `EbookReader` active-source path has been removed.
 
 3. **Touch**
    - Normalize coordinates to `540x960` logical portrait.
