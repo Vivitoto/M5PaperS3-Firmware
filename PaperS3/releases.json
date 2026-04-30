@@ -5,6 +5,21 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v0.3.8-rc",
+      "name": "Vink-PaperS3 v0.3.8-rc A+B+D 三合一优化版",
+      "summary": "三合一优化：epd_text LUT 改善文字刷新质量、线性 kRemap 消除激进压缩导致的 Bayer 节结、ReaderTextRenderer 全部走 pixelColorForNibble 统一 AA 路径。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.3.8-rc",
+      "changelog": "## Vink-PaperS3 v0.3.8-rc A+B+D 三合一优化版\n\n### 三项优化\n- **A. epd_text LUT**：普通 UI push 改用 epd_text (kNormalRefresh) 而非 epd_quality，改善文字/UI 刷新质量。\n- **B. 线性 kRemap**：CjkTextRenderer + ReaderTextRenderer 的 kRemap 表改为完全线性（无激进压缩），消除激进压缩导致的 Bayer dithering 节结/锯齿。\n- **D. Reader 统一 AA 路径**：ReaderTextRenderer 不再对 nibble 分级硬编码颜色，全部走 pixelColorForNibble 统一映射。\n\n### 改动\n- DisplayService::chooseRefreshMode：普通 push 返回 kNormalRefresh (epd_text)；质量请求仍用 epd_quality。\n- VinkRuntime 启动探针后同样用 epd_text。\n- CjkTextRenderer::pixelColorForNibble：kRemap 注释更新为线性版本。\n- ReaderTextRenderer::pixelColorForNibble：kRemap 注释更新为线性版本；drawReadPaperGlyph 不再硬编码颜色分段，全部走 pixelColorForNibble。\n\n### 验证状态\n- 本地已验证：source smoke、PlatformIO build、buildfs、full 16MB merge。\n- 需要真机验证：文字边缘锯齿是否改善、epd_text 刷新质量、Reader 渲染路径是否正常。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v0.3.8-rc-abc-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.3.8-rc/Vink-PaperS3-v0.3.8-rc-abc-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        }
+      }
+    },
+    {
       "version": "v0.3.7-rc",
       "name": "Vink-PaperS3 v0.3.7-rc 抗锯齿灰度修复 & 统一 24px RC",
       "summary": "基于真机反馈保留 24px UI 简体字体与现有卡片布局，修复：英文大小写 descender baseline 对齐、中文同一行盒、Reader 提示页标点 yOffset；增强抗锯齿灰度 gamma 补偿映射，使笔画边缘在电子纸上清晰锐利。",

@@ -142,9 +142,7 @@ int16_t ReaderTextRenderer::textWidth(const char* text) const {
 uint16_t ReaderTextRenderer::pixelColorForNibble(uint8_t nibble, uint16_t color) const {
     if (color == TFT_WHITE) return TFT_WHITE;
     if (color != TFT_BLACK) return color;
-    // E-paper has only 16 gray levels with a steep contrast response curve.
-    // Remap 4bpp values (0-15) through a gamma-compensated table so mid-gray
-    // anti-alias edges look darker on e-ink while darkest edges stay crisp.
+    // A+B+D: linear kRemap; all ReadPaper AA pixels go through unified path
     static const uint8_t kRemap[16] __attribute__((aligned(1))) = {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
     };
@@ -232,9 +230,7 @@ void ReaderTextRenderer::drawGlyph(uint32_t unicode, int16_t x, int16_t y, uint1
                 if (px < 0 || px >= kPaperS3Width) continue;
                 const int srcIdx = row * ((width + 1) / 2) + col / 2;
                 const uint8_t nibble = (col % 2 == 0) ? ((bmp[srcIdx] >> 4) & 0x0F) : (bmp[srcIdx] & 0x0F);
-                if (nibble >= 11) canvas_->drawPixel(px, py, color);
-                else if (nibble >= 6) canvas_->drawPixel(px, py, 0x8410);
-                else if (nibble > 0) canvas_->drawPixel(px, py, 0xC618);
+                if (nibble > 0) canvas_->drawPixel(px, py, pixelColorForNibble(nibble, color));
             }
         }
         return;

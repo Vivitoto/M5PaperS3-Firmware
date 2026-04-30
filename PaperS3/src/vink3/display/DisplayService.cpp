@@ -179,13 +179,13 @@ epd_mode_t DisplayService::chooseRefreshMode(const DisplayRequest& request) {
     M5.Display.setColorDepth(kTextColorDepthHigh);
 
     if (needMiddleStep) {
-        M5.Display.setEpdMode(kQualityRefresh);
+        M5.Display.setEpdMode(kNormalRefresh);
         M5.Display.waitDisplay();
     }
 
-    // Official-baseline RC: prefer quality refresh over custom fast/text modes
-    // until real PaperS3 boot/display behavior is confirmed stable.
-    return kQualityRefresh;
+    // A+B+D: use epd_text LUT for normal UI pushes — crisper text rendering.
+    // quality requests still use epd_quality.
+    return kNormalRefresh;
 }
 
 void DisplayService::push(const DisplayRequest& request, M5Canvas* canvasToPush) {

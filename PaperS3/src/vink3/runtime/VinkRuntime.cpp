@@ -39,7 +39,8 @@ void applyOfficialPaperS3DisplaySetup() {
 }
 
 void drawOfficialBootProbe() {
-    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+    // A+B+D: use epd_text LUT for boot probe — crisper text rendering
+    M5.Display.setEpdMode(epd_mode_t::epd_text);
     M5.Display.setTextDatum(middle_center);
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.fillScreen(TFT_WHITE);

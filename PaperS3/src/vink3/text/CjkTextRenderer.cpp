@@ -292,11 +292,9 @@ uint16_t CjkTextRenderer::pixelColorForNibble(uint8_t nibble, uint16_t color) co
     if (color == TFT_WHITE) return TFT_WHITE;
     if (color != TFT_BLACK) return color;
     // E-paper has only 16 gray levels with a steep contrast response curve.
-    // Low-alpha anti-alias pixels (nibble 1-4) look like specks or disappear.
-    // Remap 4bpp values (0-15) through a 4-bit gamma-compensated table so
-    // mid-gray anti-alias edges appear visibly darker on e-ink while the
-    // darkest edges remain crisp. kRemap[16] squashes the light end; k4BitTo
-    // converts to e-paper-friendly RGB565 levels.
+    // A+B+D: linear kRemap prevents Bayer dithering artifacts at AA edge
+    // pixels (nibble 1-4). No aggressive compression — edge pixels stay closer
+    // to background gray (~192), producing smoother Bayer transitions.
     static const uint8_t kRemap[16] __attribute__((aligned(1))) = {
         0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
     };
