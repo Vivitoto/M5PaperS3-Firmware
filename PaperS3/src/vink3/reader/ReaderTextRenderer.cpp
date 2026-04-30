@@ -14,7 +14,6 @@ ReaderTextRenderer g_readerText;
 
 bool ReaderTextRenderer::begin(M5Canvas* canvas) {
     canvas_ = canvas;
-    if (canvas_) smallFont_.loadBundledFont(FONT_FILE_16);
     return canvas_ && loadDefaultFont();
 }
 
@@ -115,12 +114,6 @@ bool ReaderTextRenderer::findReadPaperGlyph(uint32_t unicode, ReadPaperGlyph& ou
     return false;
 }
 
-uint8_t ReaderTextRenderer::smallCharAdvance(uint32_t unicode) const {
-    if (!smallFont_.isLoaded()) return charAdvance(unicode);
-    uint8_t adv = const_cast<FontManager&>(smallFont_).getCharAdvance(unicode);
-    return adv > 0 ? adv : (unicode < 128 ? 8 : smallFont_.getFontSize());
-}
-
 uint8_t ReaderTextRenderer::charAdvance(uint32_t unicode) const {
     if (readPaperFullReady_) {
         ReadPaperGlyph glyph;
@@ -146,27 +139,21 @@ int16_t ReaderTextRenderer::textWidth(const char* text) const {
     return w;
 }
 
-int16_t ReaderTextRenderer::smallTextWidth(const char* text) const {
-    if (!text) return 0;
-    if (!smallFont_.isLoaded()) return textWidth(text);
-    int16_t w = 0;
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(text);
-    size_t pos = 0;
-    const size_t len = strlen(text);
-    while (pos < len) {
-        uint32_t ch = decodeUtf8(bytes, pos, len);
-        if (ch == '\n') break;
-        w += smallCharAdvance(ch);
-    }
-    return w;
-}
-
 uint16_t ReaderTextRenderer::pixelColorForNibble(uint8_t nibble, uint16_t color) const {
     if (color == TFT_WHITE) return TFT_WHITE;
     if (color != TFT_BLACK) return color;
-    if (nibble >= 11) return TFT_BLACK;
-    if (nibble >= 6) return 0x8410;
-    return 0xC618;
+    // E-paper has only 16 gray levels with a steep contrast response curve.
+    // Remap 4bpp values (0-15) through a gamma-compensated table so mid-gray
+    // anti-alias edges look darker on e-ink while darkest edges stay crisp.
+    static const uint8_t kRemap[16] __attribute__((aligned(1))) = {
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
+    };
+    static const uint16_t k4BitToRgb565[16] __attribute__((aligned(2))) = {
+        0xFFFF, 0xEFFF, 0xCFFF, 0xADAD, 0x8A8A, 0x7B7B,
+        0x6B6B, 0x5B5B, 0x4B4B, 0x39A5, 0x294A, 0x2108,
+        0x1800, 0x1000, 0x0841, 0x0000
+    };
+    return k4BitToRgb565[kRemap[nibble & 0x0F]];
 }
 
 void ReaderTextRenderer::drawReadPaperGlyph(const ReadPaperGlyph& glyph, int16_t x, int16_t y, uint16_t color) {
@@ -214,32 +201,6 @@ void ReaderTextRenderer::drawReadPaperGlyph(const ReadPaperGlyph& glyph, int16_t
             }
         }
         pixelIdx++;
-    }
-}
-
-void ReaderTextRenderer::drawSmallGlyph(uint32_t unicode, int16_t x, int16_t y, uint16_t color) {
-    if (!canvas_ || !smallFont_.isLoaded()) return;
-    if (smallFont_.getFontType() == FontType::GRAY_4BPP) {
-        uint8_t width = 0, height = 0, advance = 0;
-        int8_t bearingX = 0, bearingY = 0;
-        const uint8_t* bmp = smallFont_.getCharBitmapGray(unicode, width, height, bearingX, bearingY, advance);
-        if (!bmp || width == 0 || height == 0) return;
-        const int16_t drawX = x + bearingX;
-        const int16_t baseline = (static_cast<int16_t>(smallFont_.getFontSize()) * 7) / 8;
-        const int16_t drawY = y + baseline - static_cast<int16_t>(bearingY);
-        for (int row = 0; row < height; row++) {
-            const int16_t py = drawY + row;
-            if (py < 0 || py >= kPaperS3Height) continue;
-            for (int col = 0; col < width; col++) {
-                const int16_t px = drawX + col;
-                if (px < 0 || px >= kPaperS3Width) continue;
-                const int srcIdx = row * ((width + 1) / 2) + col / 2;
-                const uint8_t nibble = (col % 2 == 0) ? ((bmp[srcIdx] >> 4) & 0x0F) : (bmp[srcIdx] & 0x0F);
-                if (nibble >= 11) canvas_->drawPixel(px, py, color);
-                else if (nibble >= 6) canvas_->drawPixel(px, py, 0x8410);
-                else if (nibble > 0) canvas_->drawPixel(px, py, 0xC618);
-            }
-        }
     }
 }
 
@@ -297,6 +258,7 @@ void ReaderTextRenderer::drawGlyph(uint32_t unicode, int16_t x, int16_t y, uint1
 
 void ReaderTextRenderer::drawText(int16_t x, int16_t y, const char* text, uint16_t color) {
     if (!canvas_ || !text) return;
+    if (!readPaperFullReady_ && !font_.isLoaded()) return;
     int16_t cx = x;
     const uint8_t* bytes = reinterpret_cast<const uint8_t*>(text);
     size_t pos = 0;
@@ -306,24 +268,6 @@ void ReaderTextRenderer::drawText(int16_t x, int16_t y, const char* text, uint16
         if (ch == '\n') break;
         drawGlyph(ch, cx, y, color);
         cx += charAdvance(ch);
-    }
-}
-
-void ReaderTextRenderer::drawSmallText(int16_t x, int16_t y, const char* text, uint16_t color) {
-    if (!canvas_ || !text) return;
-    if (!smallFont_.isLoaded()) {
-        drawText(x, y, text, color);
-        return;
-    }
-    int16_t cx = x;
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(text);
-    size_t pos = 0;
-    const size_t len = strlen(text);
-    while (pos < len && cx < kPaperS3Width) {
-        uint32_t ch = decodeUtf8(bytes, pos, len);
-        if (ch == '\n') break;
-        drawSmallGlyph(ch, cx, y, color);
-        cx += smallCharAdvance(ch);
     }
 }
 
@@ -446,7 +390,7 @@ void ReaderTextRenderer::renderTextPage(const char* title, const char* body, uin
 
     char footer[48];
     snprintf(footer, sizeof(footer), "%u / %u", static_cast<unsigned>(page), static_cast<unsigned>(totalPages));
-    drawSmallText(kPaperS3Width - options.marginRight - smallTextWidth(footer), kPaperS3Height - 30, footer, mid);
+    drawText(kPaperS3Width - options.marginRight - textWidth(footer), kPaperS3Height - 34, footer, mid);
 }
 
 void ReaderTextRenderer::renderListPage(const char* title, const char* summary, const char* const* rows, int rowCount, int16_t rowY, int16_t rowH, uint16_t page, uint16_t totalPages, int activeTab, const ReaderRenderOptions& options) {
@@ -461,7 +405,7 @@ void ReaderTextRenderer::renderListPage(const char* title, const char* summary, 
     canvas_->drawFastHLine(options.marginLeft, 61, kPaperS3Width - options.marginLeft - options.marginRight, fg);
     drawShellTabs(activeTab, options);
     // Summary/help text is secondary; keep it smaller than primary row labels.
-    if (summary && summary[0]) drawSmallText(options.marginLeft, 162, summary, mid);
+    if (summary && summary[0]) drawText(options.marginLeft, 162, summary, mid);
 
     const int16_t maxWidth = kPaperS3Width - options.marginLeft - options.marginRight;
     for (int i = 0; rows && i < rowCount; ++i) {
@@ -481,7 +425,7 @@ void ReaderTextRenderer::renderListPage(const char* title, const char* summary, 
 
     char footer[48];
     snprintf(footer, sizeof(footer), "%u / %u", static_cast<unsigned>(page), static_cast<unsigned>(totalPages));
-    drawSmallText(kPaperS3Width - options.marginRight - smallTextWidth(footer), kPaperS3Height - 30, footer, mid);
+    drawText(kPaperS3Width - options.marginRight - textWidth(footer), kPaperS3Height - 34, footer, mid);
 }
 
 void ReaderTextRenderer::renderActionPage(const char* title, const char* const* infoLines, int infoCount, const char* const* actions, int actionCount, int activeTab, const ReaderRenderOptions& options) {
@@ -498,8 +442,8 @@ void ReaderTextRenderer::renderActionPage(const char* title, const char* const* 
     drawShellTabs(activeTab, options);
 
     const int16_t maxWidth = kPaperS3Width - options.marginLeft - options.marginRight;
-    const int16_t smallLineHeight = smallFont_.isLoaded() ? static_cast<int16_t>(smallFont_.getFontSize()) + 8 : fontSize() + options.lineGap;
-    int16_t y = 162;
+    const int16_t lineHeight = fontSize() + options.lineGap;
+    int16_t y = 160;
     for (int i = 0; infoLines && i < infoCount && y < 510; ++i) {
         const char* lineText = infoLines[i] ? infoLines[i] : "";
         size_t start = 0;
@@ -512,8 +456,8 @@ void ReaderTextRenderer::renderActionPage(const char* title, const char* const* 
             if (n >= sizeof(line)) n = sizeof(line) - 1;
             memcpy(line, lineText + start, n);
             line[n] = '\0';
-            drawSmallText(options.marginLeft, y, line, mid);
-            y += smallLineHeight;
+            drawText(options.marginLeft, y, line, mid);
+            y += lineHeight;
             start = end;
             wraps++;
         }
