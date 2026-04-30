@@ -29,9 +29,7 @@ private:
     bool powerButtonArmed_ = false;
     bool powerWasPressed_ = false;
     bool powerLongPosted_ = false;
-    uint8_t powerClickCount_ = 0;
     uint32_t powerPressStartedMs_ = 0;
-    uint32_t powerFirstClickMs_ = 0;
     uint32_t suppressUntilMs_ = 0;
     bool waitRelease_ = false;
     uint32_t lastMovePostMs_ = 0;

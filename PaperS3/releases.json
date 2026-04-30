@@ -5,6 +5,36 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v0.3.5-rc",
+      "name": "Vink-PaperS3 v0.3.5-rc 官方底层回归 RC",
+      "summary": "针对真机反馈连开机显示都没有反应，撤掉非官方底层假设：启动严格回归 M5Stack 官方 UserDemo 路径 M5.begin() + Display.setRotation(1) + epd_quality 直接首屏，触摸按官方 M5.update/getDetail raw 坐标读取，不做坐标推断/旋转搜索。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.3.5-rc",
+      "changelog": "## Vink-PaperS3 v0.3.5-rc 官方底层回归 RC\n\n### 目的\n- v0.3.3-rc 真机反馈：烧录后按电源键连开机/启动显示都没有反应。\n- 本版不再继续修补上层交互，先回归官方底层启动、显示、触摸路径。\n\n### 官方底层回归\n- 启动改回 M5Stack UserDemo 方式：`M5.begin()` 默认路径。\n- 显示改回官方 UserDemo 基线：`M5.Display.setRotation(1)`。\n- 首屏直接用 `M5.Display` + `epd_quality` 画白底启动探针文字，先验证真机开机后 EPD 必须有画面。\n- 底层显示尺寸改为官方 UserDemo 的 960×540。\n- 触摸输入按官方示例：循环 `M5.update()`，读取 `M5.Touch.getDetail()` / `isPressed()`，raw 坐标直接使用，不做 540×960 推断、缩放、旋转或 coordinate-mode 猜测。\n- 显示刷新暂时优先 `epd_quality`，不使用自定义 fast/text 切换作为底层默认。\n\n### 验证状态\n- 本地已验证：编译、buildfs、full 16MB merge。\n- 需要真机验证：烧录后是否立即出现 official boot 探针文字；触摸诊断 raw 坐标是否按官方路径变化。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v0.3.5-rc-official-baseline-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.3.5-rc/Vink-PaperS3-v0.3.5-rc-official-baseline-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        }
+      }
+    },
+    {
+      "version": "v0.3.4-rc",
+      "name": "Vink-PaperS3 v0.3.4-rc 电源键热修 RC",
+      "summary": "针对 v0.3.3-rc 真机反馈“按电源键没有反应”做电源键热修：不再把 GPIO36 当作 PaperS3 侧边电源键读取，改为只走 M5Unified BtnPWR；单次稳定按下即请求关机，同时保留长按兜底，并在设置页增加触摸关机入口。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.3.4-rc",
+      "changelog": "## Vink-PaperS3 v0.3.4-rc 电源键热修 RC\n\n### 电源键热修\n- 针对 v0.3.3-rc 真机反馈：按侧边电源键没有反应。\n- 不再把 GPIO36 当作 PaperS3 侧边电源键读取；GPIO36 只保留为 legacy M5Paper touch-int 审计备注。\n- 电源键输入改为仅使用 M5Unified `BtnPWR`，并关闭默认 debounce/hold 阈值干扰。\n- 启动后等待按键释放再 arm，但等待时间从 3s 降到 1.2s。\n- 系统内单次稳定按下/松开即请求关机，不再使用无视觉反馈的双击窗口。\n- 保留 1.2s 长按兜底。\n- deep-sleep fallback 不再 arm 未验证的 GPIO36 wake source。\n\n### 触摸兜底\n- 设置页“系统 / 电源”行增加触摸关机入口：如果物理侧键仍因硬件/库限制无法读到，可以从设置页点电源关机。\n\n### 验证状态\n- 本地已验证：source smoke、PlatformIO build/buildfs/full merge。\n- 需要真机验证：侧边电源键是否能触发关机页、设置页电源触摸关机、关机后是否断电/不重启。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v0.3.4-rc-powerkey-hotfix-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.3.4-rc/Vink-PaperS3-v0.3.4-rc-powerkey-hotfix-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        }
+      }
+    },
+    {
       "version": "v0.3.3-rc",
       "name": "Vink-PaperS3 v0.3.3-rc 官方触控/UI/电源键 RC",
       "summary": "基于官方 PaperS3 文档继续核对触控、UI 显示与电源键交互：触摸坐标模式改为持久化判定并支持过渡/唤醒抑制，阅读页补齐大区域三分区翻页，阅读管理页 Tab 样式与 Shell 统一，书架行命中不再误进阅读菜单，电源键按官方双击关机并保留长按兜底。",

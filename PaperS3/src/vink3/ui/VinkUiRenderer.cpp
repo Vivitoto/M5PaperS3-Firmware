@@ -64,14 +64,7 @@ bool isOfficialChargeStateActive() {
 }
 
 const char* touchCoordModeLabel() {
-    switch (gPaperS3TouchCoordMode) {
-        case TouchCoordMode::Logical540x960: return "logical";
-        case TouchCoordMode::PhysicalScale960x540: return "phys-scale";
-        case TouchCoordMode::PhysicalRot90: return "phys-r90";
-        case TouchCoordMode::PhysicalRot180: return "phys-r180";
-        case TouchCoordMode::PhysicalRot270: return "phys-r270";
-        default: return "unknown";
-    }
+    return "official-raw";
 }
 
 void formatBatteryPercent(char* out, size_t outSize) {
@@ -256,8 +249,8 @@ void VinkUiRenderer::renderSettings() {
     drawSettingsGroup(kContentY, "阅读", "正文字体", "默认", "字号与行距", "默认");
     drawSettingsGroup(302, "显示", "刷新策略", "均衡", "触摸校准", "诊断");
     drawSettingsGroup(450, "连接", "WiFi", "配置", "Legado", "地址");
-    drawSettingsGroup(598, "系统", "电池与休眠", "自动", "关于", "v0.3.2-rc");
-    drawFooterHint("设置行同一水平线；点触摸校准进入官方诊断");
+    drawSettingsGroup(598, "系统", "电源", "点按关机", "关于", "v0.3.4-rc");
+    drawFooterHint("设置行同一水平线；触摸校准进诊断，电源行可关机");
 }
 
 void VinkUiRenderer::renderDiagnostics(const Message& lastTouch, const char* eventName) {
@@ -311,7 +304,7 @@ void VinkUiRenderer::renderShutdown(const char* reason) {
     g_cjkText.drawCentered(54, 350, 432, 48, reason ? reason : "正在关机", TFT_BLACK);
     g_cjkText.drawCentered(72, 430, 396, 32, "正在保存进度并关闭电源", kGrayText);
     g_cjkText.drawCentered(72, 482, 396, 32, "请松开侧边电源键", kGrayText);
-    g_cjkText.drawCentered(0, 690, kPaperS3Width, 28, "PaperS3 官方电源键：单击开机，双击关机", kGrayText);
+    g_cjkText.drawCentered(0, 690, kPaperS3Width, 28, "单按侧边键关机；若侧键无效，可从设置页点电源", kGrayText);
 }
 
 void VinkUiRenderer::renderLegadoSync(const char* status) {
@@ -358,6 +351,7 @@ UiAction VinkUiRenderer::hitTest(SystemState state, int16_t x, int16_t y) const 
             break;
         case SystemState::Settings:
             if (inRect(x, y, 56, 386, 424, 42)) return UiAction::OpenDiagnostics;
+            if (inRect(x, y, 56, 640, 424, 42)) return UiAction::RequestShutdown;
             if (y >= kContentY) return UiAction::OpenSettings;
             break;
         case SystemState::Diagnostics:

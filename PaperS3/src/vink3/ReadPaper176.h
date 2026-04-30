@@ -13,23 +13,15 @@ static constexpr const char* kReadPaperUpstreamVersion = "V1.7.6";
 
 // Official M5Stack PaperS3 hardware profile.
 // Source: http://docs.m5stack.com/zh_CN/core/PaperS3
-static constexpr int16_t kPaperS3Width = 540;   // Vink logical portrait width after rotation 0
-static constexpr int16_t kPaperS3Height = 960;  // Vink logical portrait height after rotation 0
+static constexpr int16_t kPaperS3Width = 960;   // official UserDemo display width at rotation 1
+static constexpr int16_t kPaperS3Height = 540;  // official UserDemo display height at rotation 1
 static constexpr int16_t kPaperS3PhysicalWidth = 960;
 static constexpr int16_t kPaperS3PhysicalHeight = 540;
-static constexpr uint8_t kPaperS3DisplayRotation = 0;
-// Runtime-selected rotation starts from the official touch-example baseline (0),
-// then falls back to the rotation that actually exposes Vink's 540x960 portrait
-// canvas on the current M5Unified/M5GFX build. This protects against library
-// rotation semantics changing while keeping the official baseline visible.
+static constexpr uint8_t kPaperS3DisplayRotation = 1; // official M5PaperS3-UserDemo baseline
 extern uint8_t gPaperS3ActiveDisplayRotation;
 
 enum class TouchCoordMode : uint8_t {
-    Logical540x960 = 0,
-    PhysicalScale960x540 = 1,
-    PhysicalRot90 = 2,
-    PhysicalRot180 = 3,
-    PhysicalRot270 = 4,
+    OfficialRaw960x540 = 0,
 };
 extern volatile TouchCoordMode gPaperS3TouchCoordMode;
 
@@ -54,7 +46,7 @@ static constexpr gpio_num_t kBatteryAdcPin = GPIO_NUM_3;
 static constexpr gpio_num_t kChargeStatePin = GPIO_NUM_4; // factory firmware: 0 charging, 1 full/not charging
 static constexpr gpio_num_t kUsbDetectPin = GPIO_NUM_5;   // factory firmware: 1 USB-IN
 static constexpr gpio_num_t kBuzzerPin = GPIO_NUM_21;
-static constexpr gpio_num_t kPowerKeyPin = GPIO_NUM_36;   // PaperS3 side power key / wake source used by legacy Vink
+static constexpr gpio_num_t kLegacyM5PaperTouchIntPin = GPIO_NUM_36; // not PaperS3 power key; kept only as an audit note
 static constexpr gpio_num_t kPowerOffPulsePin = GPIO_NUM_44; // PMIC power-off pulse used by PaperS3 references
 static constexpr gpio_num_t kEpdPowerPin = GPIO_NUM_45;
 

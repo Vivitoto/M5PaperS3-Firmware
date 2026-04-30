@@ -10,61 +10,28 @@ namespace {
 constexpr uint32_t kPollDelayMs = 10;
 constexpr uint32_t kDebounceMs = 120;
 constexpr uint32_t kMoveDiagnosticMs = 100;
-constexpr uint32_t kPowerBootIgnoreMs = 3000;
-constexpr uint32_t kPowerStablePressMs = 80;
-constexpr uint32_t kPowerDoubleClickWindowMs = 650;
-constexpr uint32_t kPowerLongHoldMs = 1600;
+constexpr uint32_t kPowerBootIgnoreMs = 1200;
+constexpr uint32_t kPowerStablePressMs = 60;
+constexpr uint32_t kPowerLongHoldMs = 1200;
 constexpr uint32_t kLongPressMs = 700;
 constexpr int16_t kTapSlopPx = 30;
 constexpr int16_t kLongPressMovePx = 34;
 constexpr int16_t kSwipeThresholdPx = 80;
 
-const char* touchCoordModeName(TouchCoordMode mode) {
-    switch (mode) {
-        case TouchCoordMode::Logical540x960: return "logical540x960";
-        case TouchCoordMode::PhysicalScale960x540: return "physical-scale";
-        case TouchCoordMode::PhysicalRot90: return "physical-rot90";
-        case TouchCoordMode::PhysicalRot180: return "physical-rot180";
-        case TouchCoordMode::PhysicalRot270: return "physical-rot270";
-        default: return "unknown";
-    }
+const char* touchCoordModeName(TouchCoordMode) {
+    return "official-raw-960x540";
 }
 
 TouchPoint transformRawPaperS3Point(int rawX, int rawY) {
-    // Do not infer the coordinate frame per point: physical 960x540 points in
-    // the left/top part of the panel overlap the 540x960 logical range. Once a
-    // strong physical-coordinate signal is seen, keep using that mode until boot.
+    // Official touch example draws touchDetail.x/y directly after
+    // M5.Display.setRotation(0/1) and M5.update(). For this official baseline
+    // RC, do not infer, scale, rotate, or remap coordinates in the input layer.
     int x = rawX;
     int y = rawY;
-    switch (gPaperS3TouchCoordMode) {
-        case TouchCoordMode::PhysicalScale960x540:
-            x = (static_cast<int32_t>(rawX) * kPaperS3Width) / kPaperS3PhysicalWidth;
-            y = (static_cast<int32_t>(rawY) * kPaperS3Height) / kPaperS3PhysicalHeight;
-            break;
-        case TouchCoordMode::PhysicalRot90:
-            x = rawY;
-            y = kPaperS3PhysicalWidth - 1 - rawX;
-            break;
-        case TouchCoordMode::PhysicalRot180:
-            x = kPaperS3Width - 1 - rawY;
-            y = kPaperS3PhysicalWidth - 1 - rawX;
-            break;
-        case TouchCoordMode::PhysicalRot270:
-            x = kPaperS3PhysicalHeight - 1 - rawY;
-            y = rawX;
-            break;
-        case TouchCoordMode::Logical540x960:
-        default:
-            x = rawX;
-            y = rawY;
-            break;
-    }
-
-    // Clamp defensively so invalid release coordinates do not escape into hit-test.
     if (x < 0) x = 0;
     if (y < 0) y = 0;
-    if (x >= kPaperS3Width) x = kPaperS3Width - 1;
-    if (y >= kPaperS3Height) y = kPaperS3Height - 1;
+    if (x >= M5.Display.width()) x = M5.Display.width() - 1;
+    if (y >= M5.Display.height()) y = M5.Display.height() - 1;
     return TouchPoint(static_cast<int16_t>(x), static_cast<int16_t>(y));
 }
 
@@ -83,7 +50,11 @@ bool InputService::begin(StateMachine* stateMachine) {
             return false;
         }
     }
-    pinMode(static_cast<int>(kPowerKeyPin), INPUT_PULLUP);
+    // PaperS3 side power key is exposed through M5Unified BtnPWR; GPIO36 is
+    // a legacy M5Paper touch interrupt in references, not a reliable PaperS3
+    // power-key input. Do not configure/read GPIO36 as a power button.
+    M5.BtnPWR.setDebounceThresh(0);
+    M5.BtnPWR.setHoldThresh(0);
     Serial.println("[vink3][input] service started");
     return true;
 }
@@ -110,20 +81,8 @@ void InputService::suppressUntilRelease(uint32_t cooldownMs) {
     Serial.printf("[vink3][touch] suppress until release for %lu ms\n", static_cast<unsigned long>(cooldownMs));
 }
 
-void InputService::updateTouchCoordMode(int rawX, int rawY) {
-    if (gPaperS3TouchCoordMode != TouchCoordMode::Logical540x960) return;
-    const bool looksPhysicalLandscape = rawX >= kPaperS3Width && rawX < kPaperS3PhysicalWidth && rawY >= 0 && rawY < kPaperS3PhysicalHeight;
-    if (!looksPhysicalLandscape) return;
-
-    switch (gPaperS3ActiveDisplayRotation & 0x03) {
-        case 1: gPaperS3TouchCoordMode = TouchCoordMode::PhysicalRot90; break;
-        case 2: gPaperS3TouchCoordMode = TouchCoordMode::PhysicalRot180; break;
-        case 3: gPaperS3TouchCoordMode = TouchCoordMode::PhysicalRot270; break;
-        case 0:
-        default: gPaperS3TouchCoordMode = TouchCoordMode::PhysicalScale960x540; break;
-    }
-    Serial.printf("[vink3][touch] detected physical coordinate mode: %s from raw=%d,%d rotation=%u\n",
-                  touchCoordModeName(gPaperS3TouchCoordMode), rawX, rawY, gPaperS3ActiveDisplayRotation);
+void InputService::updateTouchCoordMode(int, int) {
+    // Official baseline: no coordinate-mode guessing.
 }
 
 void InputService::pollTouch() {
@@ -258,28 +217,20 @@ void InputService::pollTouch() {
 void InputService::pollPowerButton(uint32_t now) {
     if (!stateMachine_) return;
 
-    const bool m5Pressed = M5.BtnPWR.isPressed();
-    const bool gpioPressed = digitalRead(static_cast<int>(kPowerKeyPin)) == LOW;
-    const bool pressed = m5Pressed || gpioPressed;
+    const bool pressed = M5.BtnPWR.isPressed();
 
-    // Official PaperS3 docs: single-click side key powers on, double-click powers
-    // off. Ignore the boot press until it has been released after startup.
+    // Real-device feedback: using GPIO36 as a PaperS3 power key produced no
+    // useful response. Treat M5Unified BtnPWR as the only physical source and
+    // make the action visible/immediate: one stable press requests shutdown.
     if (!powerButtonArmed_) {
         if (now > kPowerBootIgnoreMs && !pressed) {
             powerButtonArmed_ = true;
             powerPressStartedMs_ = 0;
             powerWasPressed_ = false;
             powerLongPosted_ = false;
-            powerClickCount_ = 0;
-            powerFirstClickMs_ = 0;
-            Serial.println("[vink3][power] power key armed after boot release");
+            Serial.println("[vink3][power] BtnPWR armed after boot release");
         }
         return;
-    }
-
-    if (powerClickCount_ == 1 && powerFirstClickMs_ != 0 && now - powerFirstClickMs_ > kPowerDoubleClickWindowMs) {
-        powerClickCount_ = 0;
-        powerFirstClickMs_ = 0;
     }
 
     if (pressed) {
@@ -287,17 +238,16 @@ void InputService::pollPowerButton(uint32_t now) {
             powerWasPressed_ = true;
             powerLongPosted_ = false;
             powerPressStartedMs_ = now;
+            Serial.println("[vink3][power] BtnPWR down");
         }
         if (!powerLongPosted_ && powerPressStartedMs_ != 0 && now - powerPressStartedMs_ >= kPowerLongHoldMs) {
             powerLongPosted_ = true;
             powerButtonArmed_ = false;
-            powerClickCount_ = 0;
-            powerFirstClickMs_ = 0;
             Message msg;
             msg.type = MessageType::PowerButton;
             msg.timestampMs = now;
             stateMachine_->post(msg, 0);
-            Serial.println("[vink3][power] long power-key hold -> shutdown request");
+            Serial.println("[vink3][power] BtnPWR long hold -> shutdown request");
         }
         return;
     }
@@ -306,21 +256,13 @@ void InputService::pollPowerButton(uint32_t now) {
         const uint32_t held = powerPressStartedMs_ ? now - powerPressStartedMs_ : 0;
         powerWasPressed_ = false;
         powerPressStartedMs_ = 0;
-        if (!powerLongPosted_ && held >= kPowerStablePressMs && held < kPowerLongHoldMs) {
-            if (powerClickCount_ == 0 || now - powerFirstClickMs_ > kPowerDoubleClickWindowMs) {
-                powerClickCount_ = 1;
-                powerFirstClickMs_ = now;
-                Serial.println("[vink3][power] first power-key click, waiting for official double-click");
-            } else {
-                powerClickCount_ = 0;
-                powerFirstClickMs_ = 0;
-                powerButtonArmed_ = false;
-                Message msg;
-                msg.type = MessageType::PowerButton;
-                msg.timestampMs = now;
-                stateMachine_->post(msg, 0);
-                Serial.println("[vink3][power] official double-click -> shutdown request");
-            }
+        if (!powerLongPosted_ && held >= kPowerStablePressMs) {
+            powerButtonArmed_ = false;
+            Message msg;
+            msg.type = MessageType::PowerButton;
+            msg.timestampMs = now;
+            stateMachine_->post(msg, 0);
+            Serial.printf("[vink3][power] BtnPWR click held=%lu -> shutdown request\n", static_cast<unsigned long>(held));
         }
         powerLongPosted_ = false;
     }

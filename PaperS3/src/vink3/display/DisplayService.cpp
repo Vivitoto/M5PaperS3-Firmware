@@ -41,8 +41,7 @@ bool DisplayService::begin(M5Canvas* canvas, uint8_t queueLen) {
             return false;
         }
     }
-    M5.Display.powerSaveOff();
-    Serial.printf("[vink3][display] service started from ReadPaper %s model\n", kReadPaperUpstreamVersion);
+    Serial.println("[vink3][display] service started on official M5.Display path");
     return true;
 }
 
@@ -177,17 +176,16 @@ epd_mode_t DisplayService::chooseRefreshMode(const DisplayRequest& request) {
         return kQualityRefresh;
     }
 
-    // Canvas remains 4bpp; restore display color depth after a quality refresh
-    // so fast/text pushes keep the expected PaperS3 grayscale path.
-    M5.Display.setColorDepth(kTextColorDepth);
+    M5.Display.setColorDepth(kTextColorDepthHigh);
 
     if (needMiddleStep) {
-        M5.Display.setEpdMode(kMiddleRefresh);
-        M5.Display.fillRect(0, 476, kPaperS3Width, 8, TFT_WHITE);
+        M5.Display.setEpdMode(kQualityRefresh);
         M5.Display.waitDisplay();
     }
 
-    return fastRefresh_ ? kLowRefresh : kNormalRefresh;
+    // Official-baseline RC: prefer quality refresh over custom fast/text modes
+    // until real PaperS3 boot/display behavior is confirmed stable.
+    return kQualityRefresh;
 }
 
 void DisplayService::push(const DisplayRequest& request, M5Canvas* canvasToPush) {
@@ -196,8 +194,8 @@ void DisplayService::push(const DisplayRequest& request, M5Canvas* canvasToPush)
     busy_ = true;
     g_inDisplayPush = true;
 
-    M5.Display.powerSaveOff();
     M5.Display.waitDisplay();
+    M5.Display.setColorDepth(kTextColorDepthHigh);
     M5.Display.setEpdMode(chooseRefreshMode(request));
 
     const int16_t x = request.x;

@@ -14,7 +14,7 @@
 namespace vink3 {
 
 uint8_t gPaperS3ActiveDisplayRotation = kPaperS3DisplayRotation;
-volatile TouchCoordMode gPaperS3TouchCoordMode = TouchCoordMode::Logical540x960;
+volatile TouchCoordMode gPaperS3TouchCoordMode = TouchCoordMode::OfficialRaw960x540;
 VinkRuntime g_runtime;
 
 namespace {
@@ -30,35 +30,24 @@ void configureOfficialPaperS3Gpios() {
 #endif
 }
 
-void applyPaperS3PortraitRotation() {
-    M5.Display.setRotation(kPaperS3DisplayRotation);
-    delay(20);
-    gPaperS3ActiveDisplayRotation = kPaperS3DisplayRotation;
-
-    if (M5.Display.width() == kPaperS3Width && M5.Display.height() == kPaperS3Height) {
-        return;
-    }
-
-    Serial.printf("[vink3][display] preferred rotation %u exposes %dx%d, searching 540x960 portrait\n",
-                  kPaperS3DisplayRotation, M5.Display.width(), M5.Display.height());
-    for (uint8_t rotation = 0; rotation < 4; ++rotation) {
-        M5.Display.setRotation(rotation);
-        delay(20);
-        if (M5.Display.width() == kPaperS3Width && M5.Display.height() == kPaperS3Height) {
-            gPaperS3ActiveDisplayRotation = rotation;
-            Serial.printf("[vink3][display] selected rotation=%u for logical %dx%d\n",
-                          rotation, M5.Display.width(), M5.Display.height());
-            return;
-        }
-    }
-
-    // Last-resort fallback: restore official baseline and make the mismatch loud
-    // in serial logs/diagnostics instead of silently clipping the canvas.
+void applyOfficialPaperS3DisplaySetup() {
+    // Official M5PaperS3-UserDemo baseline: M5.begin(); Display.setRotation(1).
+    // Do not search rotations or remap the framebuffer here; first prove the
+    // vendor display path boots and refreshes exactly like the official demo.
     M5.Display.setRotation(kPaperS3DisplayRotation);
     gPaperS3ActiveDisplayRotation = kPaperS3DisplayRotation;
-    Serial.printf("[vink3][display][WARN] no rotation matched %dx%d; active=%u actual=%dx%d\n",
-                  kPaperS3Width, kPaperS3Height, gPaperS3ActiveDisplayRotation,
-                  M5.Display.width(), M5.Display.height());
+}
+
+void drawOfficialBootProbe() {
+    M5.Display.setEpdMode(epd_mode_t::epd_quality);
+    M5.Display.setTextDatum(middle_center);
+    M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
+    M5.Display.fillScreen(TFT_WHITE);
+    delay(200);
+    M5.Display.drawString("Vink PaperS3 official boot", M5.Display.width() / 2, M5.Display.height() / 2 - 28);
+    M5.Display.drawString("M5.begin + rotation 1", M5.Display.width() / 2, M5.Display.height() / 2 + 18);
+    M5.Display.waitDisplay();
+    delay(800);
 }
 } // namespace
 
@@ -88,32 +77,21 @@ bool VinkRuntime::beginHardware() {
                   static_cast<int>(kChargeStatePin), static_cast<int>(kBuzzerPin));
 
     auto cfg = M5.config();
-    // Mirrors ReadPaper 1.7.6 setup order: keep the EPD from being cleared by
-    // M5.begin(), force PaperS3 fallback, and bring power/RTC/IMU online early.
-    cfg.clear_display = false;
-    cfg.output_power = true;
-    cfg.internal_imu = true;
-    cfg.internal_rtc = true;
-    cfg.internal_spk = false;
-    cfg.internal_mic = false;
-    cfg.fallback_board = m5::board_t::board_M5PaperS3;
-    M5.begin(cfg);
+    // Official M5PaperS3-UserDemo uses the default M5.begin() path. Keep this
+    // path strict and visible; no fallback-board override, no clear_display
+    // override, no ReadPaper-style startup masking.
+    (void)cfg;
+    M5.begin();
     delay(50);
     configureOfficialPaperS3Gpios();
 
-    gpio_wakeup_enable(kGt911IntPin, GPIO_INTR_LOW_LEVEL);
-    esp_sleep_enable_gpio_wakeup();
-
-    M5.Display.powerSaveOff();
-    M5.Display.wakeup();
-    M5.Display.setEpdMode(kLowRefresh);
-    M5.Display.setColorDepth(kTextColorDepth);
-    // Start from the official touch example baseline, but verify that the active
-    // library build really exposes Vink's 540x960 portrait framebuffer.
-    applyPaperS3PortraitRotation();
-    Serial.printf("[vink3][display] rotation=%u logical=%dx%d actual=%dx%d\n",
+    M5.Display.setEpdMode(kQualityRefresh);
+    M5.Display.setColorDepth(kTextColorDepthHigh);
+    applyOfficialPaperS3DisplaySetup();
+    Serial.printf("[vink3][display] official rotation=%u expected=%dx%d actual=%dx%d\n",
                   gPaperS3ActiveDisplayRotation, kPaperS3Width, kPaperS3Height,
                   M5.Display.width(), M5.Display.height());
+    drawOfficialBootProbe();
 
     if (!SPIFFS.begin(false)) {
         Serial.println("[vink3][boot] SPIFFS mount failed; continuing without formatting");
@@ -126,7 +104,7 @@ bool VinkRuntime::beginHardware() {
 bool VinkRuntime::beginCanvas() {
     if (canvasReady_) return true;
     canvas_.setPsram(true);
-    canvas_.setColorDepth(kTextColorDepth);
+    canvas_.setColorDepth(kTextColorDepthHigh);
     if (!canvas_.createSprite(kPaperS3Width, kPaperS3Height)) {
         Serial.println("[vink3][runtime] full-screen canvas allocation failed");
         return false;

@@ -16,6 +16,7 @@ enum class UiAction : uint8_t {
     OpenTransfer,
     OpenSettings,
     OpenDiagnostics,
+    RequestShutdown,
     StartLegadoSync,
     BackHome,
 };

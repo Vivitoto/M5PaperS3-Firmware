@@ -33,7 +33,7 @@ void pulsePaperS3PowerOffPin() {
 
 void waitPowerKeyRelease(uint32_t timeoutMs = 3000) {
     const uint32_t start = millis();
-    while ((M5.BtnPWR.isPressed() || digitalRead(static_cast<int>(kPowerKeyPin)) == LOW) && millis() - start < timeoutMs) {
+    while (M5.BtnPWR.isPressed() && millis() - start < timeoutMs) {
         M5.update();
         delay(30);
     }
@@ -59,7 +59,8 @@ void shutdownPaperS3(const char* reason) {
     delay(500);
     pulsePaperS3PowerOffPin();
     waitPowerKeyRelease();
-    esp_sleep_enable_ext0_wakeup(kPowerKeyPin, 0);
+    // Do not arm GPIO36 as wake source: on PaperS3 it is not a verified side
+    // power-key input and can make the shutdown fallback appear broken.
     esp_deep_sleep_start();
 }
 
@@ -192,6 +193,11 @@ void StateMachine::handle(const Message& message) {
                     g_uiRenderer.renderDiagnostics(message, "进入诊断");
                     g_displayService.enqueueFull(true, 100);
                     suppressAfterTransition();
+                    break;
+
+                case UiAction::RequestShutdown:
+                    state_ = SystemState::Shutdown;
+                    shutdownPaperS3("正在关机");
                     break;
 
                 case UiAction::StartLegadoSync:
