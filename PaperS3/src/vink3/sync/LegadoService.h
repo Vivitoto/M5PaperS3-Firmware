@@ -55,9 +55,10 @@ public:
     // POST /saveBookProgress — push progress; returns false on network error.
     bool saveBookProgress(const BookProgress& progress);
 
-    // GET /getBookProgress?url=<bookUrl> → BookProgress (durChapterIndex/durChapterPos).
-    // Returns true if parsed successfully.
-    bool fetchBookProgress(const String& bookUrl, BookProgress& out);
+    // Official Legado Web API exposes /getBookshelf but not a standalone
+    // /getBookProgress endpoint. Pull progress by matching name/author from
+    // the bookshelf Book records.
+    bool fetchBookProgress(const String& name, const String& author, BookProgress& out);
 
     // Returns the last HTTP error string for diagnostics.
     String lastError() const { return lastError_; }

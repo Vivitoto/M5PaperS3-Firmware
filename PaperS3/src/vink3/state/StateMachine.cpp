@@ -327,7 +327,7 @@ void StateMachine::handle(const Message& message) {
                         const auto& cfg = g_configService.get();
                         if (cfg.legadoEnabled && !cfg.legadoHost.isEmpty()) {
                             LegadoConfig lc;
-                            lc.baseUrl = cfg.legadoHost;
+                            lc.baseUrl = buildLegadoBaseUrl(cfg);
                             lc.token   = cfg.legadoToken;
                             lc.enabled = cfg.legadoEnabled;
                             g_legadoService.configure(lc);
@@ -346,7 +346,7 @@ void StateMachine::handle(const Message& message) {
                     const auto& cfg = g_configService.get();
                     if (cfg.legadoEnabled && !cfg.legadoHost.isEmpty()) {
                         LegadoConfig lc;
-                        lc.baseUrl = cfg.legadoHost;
+                        lc.baseUrl = buildLegadoBaseUrl(cfg);
                         lc.token   = cfg.legadoToken;
                         lc.enabled = cfg.legadoEnabled;
                         g_legadoService.configure(lc);

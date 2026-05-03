@@ -5,6 +5,21 @@
   "description": "面向 M5Stack PaperS3 的 Vink 电子书阅读固件。",
   "releases": [
     {
+      "version": "v0.3.11-rc-legado-sync",
+      "name": "Vink-PaperS3 v0.3.11-rc-legado-sync Legado 官方进度同步修正版",
+      "summary": "修正 Legado 进度同步为官方 Web API 形态：/saveBookProgress 使用 BookProgress.name/author 字段；拉取进度改从 /getBookshelf 读取书架记录，不再调用不存在的 /getBookProgress；启动时自动加载已保存的 Legado 配置。",
+      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.3.11-rc-legado-sync",
+      "changelog": "## Vink-PaperS3 v0.3.11-rc-legado-sync Legado 官方进度同步修正版\n\n### Legado 官方依据\n- Legado 官方 `api.md` 要求先启用 Web 服务，Web API 提供 `/getBookshelf`、`/getChapterList`、`/getBookContent`、`/saveBookProgress`。\n- Legado 官方 `BookProgress.kt` 字段为 `name`、`author`、`durChapterIndex`、`durChapterPos`、`durChapterTime`、`durChapterTitle`。\n- Legado 官方 `BookController.saveBookProgress` 会按 `name + author` 找书、更新进度，并调用 `AppWebDav.uploadBookProgress`。因此 Vink 固件不需要额外自建 WebDAV 服务；如果手机端 Legado 已配置 WebDAV 和同步阅读进度，Legado 会负责上传。\n\n### 修正内容\n- `/saveBookProgress` POST JSON 改为官方 `BookProgress` 字段，不再发送错误的 `bookUrl` 字段。\n- 拉取进度不再调用官方 Web API 中不存在的 `/getBookProgress`，改为通过 `/getBookshelf` 匹配 `name/author` 并读取 `durChapterIndex/durChapterPos`。\n- GET 请求也携带可选 Authorization token，和 POST 保持一致。\n- 开机启动服务时自动根据已保存的 Legado host/port/token 配置 `LegadoService`，不需要先手动进入同步页才能连通。\n- 配置页/同步页保存 Legado 设置时统一补全 scheme 与端口，例如 `192.168.1.10 + 1122` 会规范为 `http://192.168.1.10:1122`。\n- 从 Legado 恢复进度时会先构建目标章节页表，再跳到对应页，避免只写入索引但继续阅读仍从头开始。\n\n### 保留 v0.3.10 改动\n- 阅读排版异步重建、边距循环、WebUI 排版参数、底部进度条、深色模式正文、书末完成页、长按书签路由、WebUI SD-only 文件管理、TXT/GBK/TOC 修复均保留。\n\n### 验证状态\n- 本地已验证：source smoke、PlatformIO build、buildfs、full 16MB merge。\n- 需要真机验证：Legado Web 服务连通、同名书籍 `name/author` 匹配、进度推送后手机端 Legado 是否更新并触发其 WebDAV 上传、从 `/getBookshelf` 恢复进度、阅读页跳转位置。",
+      "assets": {
+        "full": {
+          "name": "Vink-PaperS3-v0.3.11-rc-legado-sync-legado-sync-full-16MB.bin",
+          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.3.11-rc-legado-sync/Vink-PaperS3-v0.3.11-rc-legado-sync-legado-sync-full-16MB.bin",
+          "size": 16777216,
+          "flashOffset": 0
+        }
+      }
+    },
+    {
       "version": "v0.3.10-rc-async-rebuild",
       "name": "Vink-PaperS3 v0.3.10-rc-async-rebuild 排版异步重建 + 阅读体验收尾版",
       "summary": "阅读排版体验收尾：字号/行距/边距调整后异步重建分页，避免 UI 卡顿；边距循环；WebUI 暴露排版参数；阅读页增加底部进度条、深色模式渲染、书末完成页，并修复长按书签路由。",
@@ -74,21 +89,6 @@
         "full": {
           "name": "Vink-PaperS3-v0.3.6-rc-portrait-diagnostic-full-16MB.bin",
           "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.3.6-rc/Vink-PaperS3-v0.3.6-rc-portrait-diagnostic-full-16MB.bin",
-          "size": 16777216,
-          "flashOffset": 0
-        }
-      }
-    },
-    {
-      "version": "v0.3.5-rc",
-      "name": "Vink-PaperS3 v0.3.5-rc 官方底层回归 RC",
-      "summary": "针对真机反馈连开机显示都没有反应，撤掉非官方底层假设：启动严格回归 M5Stack 官方 UserDemo 路径 M5.begin() + Display.setRotation(1) + epd_quality 直接首屏，触摸按官方 M5.update/getDetail raw 坐标读取，不做坐标推断/旋转搜索。",
-      "releaseUrl": "https://github.com/Vivitoto/Vink-Firmware/releases/tag/v0.3.5-rc",
-      "changelog": "## Vink-PaperS3 v0.3.5-rc 官方底层回归 RC\n\n### 目的\n- v0.3.3-rc 真机反馈：烧录后按电源键连开机/启动显示都没有反应。\n- 本版不再继续修补上层交互，先回归官方底层启动、显示、触摸路径。\n\n### 官方底层回归\n- 启动改回 M5Stack UserDemo 方式：`M5.begin()` 默认路径。\n- 显示改回官方 UserDemo 基线：`M5.Display.setRotation(1)`。\n- 首屏直接用 `M5.Display` + `epd_quality` 画白底启动探针文字，先验证真机开机后 EPD 必须有画面。\n- 底层显示尺寸改为官方 UserDemo 的 960×540。\n- 触摸输入按官方示例：循环 `M5.update()`，读取 `M5.Touch.getDetail()` / `isPressed()`，raw 坐标直接使用，不做 540×960 推断、缩放、旋转或 coordinate-mode 猜测。\n- 显示刷新暂时优先 `epd_quality`，不使用自定义 fast/text 切换作为底层默认。\n\n### 验证状态\n- 本地已验证：编译、buildfs、full 16MB merge。\n- 需要真机验证：烧录后是否立即出现 official boot 探针文字；触摸诊断 raw 坐标是否按官方路径变化。",
-      "assets": {
-        "full": {
-          "name": "Vink-PaperS3-v0.3.5-rc-official-baseline-full-16MB.bin",
-          "url": "https://github.com/Vivitoto/Vink-Firmware/releases/download/v0.3.5-rc/Vink-PaperS3-v0.3.5-rc-official-baseline-full-16MB.bin",
           "size": 16777216,
           "flashOffset": 0
         }

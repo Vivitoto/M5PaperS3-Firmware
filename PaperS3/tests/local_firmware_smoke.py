@@ -24,7 +24,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 REPO = PROJECT.parent
 WORKSPACE = Path("/home/vito/.openclaw/workspace")
 ARTIFACTS = WORKSPACE / "artifacts" / "Vink-PaperS3"
-DEFAULT_SLUG = "async-rebuild"
+DEFAULT_SLUG = "legado-sync"
 APP_SLOT_SIZE = 0xC00000  # v0.3 single-app layout for full ReadPaper PROGMEM font
 SPIFFS_SIZE = 0x3F0000
 FULL_FLASH_SIZE = 0x1000000
@@ -121,13 +121,14 @@ def vink3_source_invariants(main_cpp: str) -> None:
     platformio = read("platformio.ini")
 
     assert_contains(main_cpp, "xTaskCreatePinnedToCore", "v0.3 main starts a ReadPaper-style pinned MainTask")
-    assert_contains(upstream, "kVinkPaperS3FirmwareVersion = \"v0.3.10-rc-async-rebuild\"", "single firmware version constant matches the manifest top version")
+    assert_contains(upstream, "kVinkPaperS3FirmwareVersion = \"v0.3.11-rc-legado-sync\"", "single firmware version constant matches the manifest top version")
     assert_contains(main_cpp, "kVinkPaperS3FirmwareVersion", "main task init log uses the shared firmware version")
     assert_contains(runtime_cpp, "kVinkPaperS3FirmwareVersion", "runtime boot logs use the shared firmware version")
     assert_not_contains(main_cpp, "v0.3.2-rc", "main task must not show stale firmware version")
     assert_not_contains(ui_cpp, "v0.3.4-rc", "settings/about must not show stale firmware version")
     assert_not_contains(reader_cpp, "v0.3.2-rc", "reader management pages must not show stale firmware version")
     assert_contains(runtime_cpp, "kReadPaperUpstreamVersion", "v0.3 runtime records ReadPaper upstream baseline")
+    assert_contains(runtime_cpp, "buildLegadoBaseUrlForRuntime", "runtime configures saved Legado host/port on boot")
     assert_contains(runtime_cpp, "applyOfficialPaperS3DisplaySetup", "v0.3 official baseline uses the official UserDemo display setup")
     assert_contains(runtime_cpp, "M5.Display.setRotation(kPaperS3DisplayRotation)", "v0.3 PaperS3 display rotation starts from the official touch-profile constant")
     assert_contains(upstream, "kPaperS3DisplayRotation = 0", "official touch-example rotation 0 is the Vink diagnostic baseline")
@@ -185,6 +186,10 @@ def vink3_source_invariants(main_cpp: str) -> None:
     assert_contains(legado_cpp, "LegadoService", "v0.3 Legado integration is isolated as a service")
     assert_not_contains(legado_cpp, "JsonArray LegadoService::getBookshelf", "Legado service must not return stack-backed JsonArray views")
     assert_contains(legado_cpp, "getBookshelfCount", "Legado bookshelf count uses safe JSON document lifetime")
+    assert_contains(legado_cpp, "obj[\"name\"]", "Legado progress push uses official BookProgress.name field")
+    assert_contains(legado_cpp, "obj[\"author\"]", "Legado progress push uses official BookProgress.author field")
+    assert_not_contains(legado_cpp, "getBookProgress?url=", "Legado progress pull must not call unsupported Web API getBookProgress endpoint")
+    assert_contains(legado_cpp, "getBookshelf", "Legado progress pull uses official Web API bookshelf data")
     assert_contains(legado_cpp, "http.addHeader(\"Authorization\"", "Legado GET/POST requests can carry token auth")
     assert_contains(state_cpp, "buildLegadoBaseUrl", "Legado sync combines host and configured port safely")
     assert_contains(ui_cpp, "CjkTextRenderer", "v0.3 UI routes text through CJK renderer")

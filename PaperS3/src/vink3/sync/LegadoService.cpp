@@ -70,6 +70,9 @@ bool LegadoService::httpGet(const String& url, String& outBody) {
         httpConnected_ = false;
         return false;
     }
+    if (!config_.token.isEmpty()) {
+        http.addHeader("Authorization", config_.token.c_str());
+    }
     int code = http.GET();
     if (code < 0) {
         lastError_ = http.errorToString(code);
@@ -182,7 +185,12 @@ bool LegadoService::saveBookProgress(const BookProgress& progress) {
     if (!config_.isValid()) return false;
     StaticJsonDocument<512> doc;
     JsonObject obj = doc.to<JsonObject>();
-    obj["bookUrl"] = progress.name;   // name used as URL key here
+    // Official Legado BookProgress.kt fields. The Android Web controller parses
+    // this object, finds the local book by name + author, updates durChapter*,
+    // then calls AppWebDav.uploadBookProgress when Legado's own WebDAV sync is
+    // enabled. No separate Vink-side WebDAV server is required.
+    obj["name"] = progress.name.c_str();
+    obj["author"] = progress.author.c_str();
     obj["durChapterIndex"] = progress.durChapterIndex;
     obj["durChapterPos"] = progress.durChapterPos;
     obj["durChapterTime"] = progress.durChapterTime;
@@ -192,30 +200,51 @@ bool LegadoService::saveBookProgress(const BookProgress& progress) {
     String resp;
     if (!httpPost(buildUrl("saveBookProgress"), body, resp)) return false;
     StaticJsonDocument<256> rdoc;
-    if (deserializeJson(rdoc, resp) != DeserializationError::Ok) return true;  // optimistic
+    if (deserializeJson(rdoc, resp) != DeserializationError::Ok) return true;  // optimistic for old builds
     JsonObject ro = rdoc.as<JsonObject>();
-    return !ro.containsKey("isSuccess") || ro["isSuccess"].as<bool>();
+    if (ro.containsKey("isSuccess") && !ro["isSuccess"].as<bool>()) {
+        lastError_ = ro.containsKey("errorMsg") ? ro["errorMsg"].as<String>() : String("saveBookProgress failed");
+        return false;
+    }
+    return true;
 }
 
-bool LegadoService::fetchBookProgress(const String& bookUrl, BookProgress& out) {
-    if (bookUrl.isEmpty()) return false;
-    char buf[256];
-    snprintf(buf, sizeof(buf), "getBookProgress?url=%s", s_urlEncode(bookUrl).c_str());
+bool LegadoService::fetchBookProgress(const String& name, const String& author, BookProgress& out) {
+    if (name.isEmpty()) return false;
     String body;
-    if (!httpGet(buildUrl(buf), body)) return false;
-    StaticJsonDocument<512> doc;
+    if (!httpGet(buildUrl("getBookshelf"), body)) return false;
+    DynamicJsonDocument doc(16384);
     auto err = deserializeJson(doc, body);
-    if (err) return false;
-    JsonObject root = doc.as<JsonObject>();
-    if (!root.containsKey("isSuccess") || !root["isSuccess"].as<bool>()) return false;
-    JsonObject data = root["data"].as<JsonObject>();
-    out.name = data.containsKey("name") ? data["name"].as<String>() : String();
-    out.author = data.containsKey("author") ? data["author"].as<String>() : String();
-    out.durChapterIndex = data.containsKey("durChapterIndex") ? data["durChapterIndex"].as<int>() : 0;
-    out.durChapterPos = data.containsKey("durChapterPos") ? data["durChapterPos"].as<int>() : 0;
-    out.durChapterTime = data.containsKey("durChapterTime") ? data["durChapterTime"].as<int64_t>() : 0;
-    out.durChapterTitle = data.containsKey("durChapterTitle") ? data["durChapterTitle"].as<String>() : String();
-    return true;
+    if (err) {
+        lastError_ = "JSON parse error";
+        return false;
+    }
+    JsonVariant data = doc["data"];
+    JsonArray books;
+    if (data.is<JsonArray>()) {
+        books = data.as<JsonArray>();
+    } else if (doc.is<JsonArray>()) {
+        books = doc.as<JsonArray>();
+    } else {
+        lastError_ = "Invalid bookshelf response";
+        return false;
+    }
+    for (JsonObject book : books) {
+        const String bookName = book["name"] | "";
+        const String bookAuthor = book["author"] | "";
+        if (bookName != name) continue;
+        if (!author.isEmpty() && bookAuthor != author) continue;
+        out.name = bookName;
+        out.author = bookAuthor;
+        out.durChapterIndex = book["durChapterIndex"] | 0;
+        out.durChapterPos = book["durChapterPos"] | 0;
+        out.durChapterTime = book["durChapterTime"] | 0;
+        out.durChapterTitle = book["durChapterTitle"] | "";
+        httpConnected_ = true;
+        return true;
+    }
+    lastError_ = "Book not found in Legado bookshelf";
+    return false;
 }
 
 } // namespace vink3

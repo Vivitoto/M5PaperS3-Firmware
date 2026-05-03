@@ -449,10 +449,14 @@ void ReaderBookService::saveProgress() {
 }
 
 void ReaderBookService::syncProgressToLegado() {
-    if (!open_ || !g_legadoService.isConnected()) return;
+    if (!open_ || !g_legadoService.isConfigured()) return;
     if (!g_configService.get().legadoEnabled) return;
     BookProgress bp;
+    // Legado official /saveBookProgress matches by BookProgress.name + author.
+    // Local TXT imports commonly have an empty author; keep Vink's title as the
+    // book name and an empty author unless a later metadata parser fills it.
     bp.name = title_;
+    bp.author = "";
     bp.durChapterIndex = currentTocIndex_;
     bp.durChapterPos = currentPage_;
     bp.durChapterTime = millis();
@@ -462,22 +466,24 @@ void ReaderBookService::syncProgressToLegado() {
     if (!g_legadoService.saveBookProgress(bp)) {
         Serial.printf("[vink3][book] legado sync save failed: %s\n", g_legadoService.lastError().c_str());
     } else {
-        Serial.printf("[vink3][book] progresso synced to legado: ch=%d pg=%d\n", currentTocIndex_, currentPage_);
+        Serial.printf("[vink3][book] progress synced to legado: ch=%d pg=%d\n", currentTocIndex_, currentPage_);
     }
 }
 
 void ReaderBookService::syncProgressFromLegado() {
-    if (!open_ || !g_legadoService.isConnected()) return;
+    if (!open_ || !g_legadoService.isConfigured()) return;
     if (!g_configService.get().legadoEnabled) return;
-    // Use book path as the key for legado progress lookup
     BookProgress bp;
-    if (!g_legadoService.fetchBookProgress(bookPath_, bp)) return;
-    // Only apply if Legado has a more recent chapter position
+    if (!g_legadoService.fetchBookProgress(title_, "", bp)) return;
+    // Only apply if Legado has a more advanced chapter/page. Legado Web API has
+    // no standalone getBookProgress endpoint; this value comes from /getBookshelf.
     if (bp.durChapterIndex <= 0 && bp.durChapterPos <= 0) return;
+    if (bp.durChapterIndex >= tocCount_) return;
     if (bp.durChapterIndex > currentTocIndex_ ||
         (bp.durChapterIndex == currentTocIndex_ && bp.durChapterPos > currentPage_)) {
+        if (!buildChapterPages(bp.durChapterIndex)) return;
         currentTocIndex_ = bp.durChapterIndex;
-        currentPage_ = bp.durChapterPos;
+        currentPage_ = bp.durChapterPos < pageCount_ ? bp.durChapterPos : 0;
         hasProgress_ = true;
         showingToc_ = false;
         Serial.printf("[vink3][book] progress restored from legado: ch=%d pg=%d\n", currentTocIndex_, currentPage_);

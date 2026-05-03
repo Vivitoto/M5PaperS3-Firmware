@@ -22,6 +22,24 @@ volatile TouchCoordMode gPaperS3TouchCoordMode = TouchCoordMode::OfficialRaw540x
 VinkRuntime g_runtime;
 
 namespace {
+String buildLegadoBaseUrlForRuntime(const VinkConfig& cfg) {
+    String base = cfg.legadoHost;
+    base.trim();
+    if (base.isEmpty()) return base;
+    if (!base.startsWith("http://") && !base.startsWith("https://")) {
+        base = "http://" + base;
+    }
+    const int scheme = base.indexOf("://");
+    const int hostStart = scheme >= 0 ? scheme + 3 : 0;
+    int slash = base.indexOf('/', hostStart);
+    if (slash < 0) slash = base.length();
+    const String hostPort = base.substring(hostStart, slash);
+    if (hostPort.indexOf(':') < 0 && cfg.legadoPort > 0) {
+        base = base.substring(0, slash) + ":" + String(cfg.legadoPort) + base.substring(slash);
+    }
+    return base;
+}
+
 void configureOfficialPaperS3Gpios() {
     pinMode(static_cast<int>(kUsbDetectPin), INPUT);
     pinMode(static_cast<int>(kChargeStatePin), INPUT);
@@ -148,6 +166,16 @@ bool VinkRuntime::beginServices() {
     if (!g_inputService.begin(&g_stateMachine)) return false;
     if (!g_wifiService.begin()) return false;
     if (!g_legadoService.begin()) return false;
+    {
+        const auto& cfg = g_configService.get();
+        if (cfg.legadoEnabled && !cfg.legadoHost.isEmpty()) {
+            LegadoConfig lc;
+            lc.baseUrl = buildLegadoBaseUrlForRuntime(cfg);
+            lc.token = cfg.legadoToken;
+            lc.enabled = cfg.legadoEnabled;
+            g_legadoService.configure(lc);
+        }
+    }
     return true;
 }
 
