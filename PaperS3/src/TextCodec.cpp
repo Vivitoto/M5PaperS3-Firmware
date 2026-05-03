@@ -198,10 +198,11 @@ String TextCodec::convertToUTF8(const char* inputPath) {
     char tempPath[128];
     snprintf(tempPath, sizeof(tempPath), "%s/%s_utf8.tmp", PROGRESS_DIR, name);
     
-    // 如果已存在，直接返回
+    // Always rebuild the UTF-8 cache from the current source file. Reusing an
+    // old temp file can show stale text after the original GBK book changes.
     if (SD.exists(tempPath)) {
-        Serial.printf("[Codec] Temp file exists: %s\n", tempPath);
-        return String(tempPath);
+        Serial.printf("[Codec] Removing stale temp file: %s\n", tempPath);
+        SD.remove(tempPath);
     }
     
     File inFile = SD.open(inputPath, FILE_READ);

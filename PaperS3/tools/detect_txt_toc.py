@@ -63,7 +63,7 @@ def iter_lines_with_offsets(text: str):
     for line in text.splitlines(keepends=True):
         bare = line.rstrip("\r\n")
         yield offset, bare
-        offset += len(line)
+        offset += len(line.encode("utf-8"))
 
 
 def detect_toc(text: str, max_entries: int = 2000) -> list[dict]:

@@ -49,6 +49,11 @@ public:
     void syncProgressToLegado();
     void syncProgressFromLegado();
 
+    bool rebuildCurrentChapter();
+    void rebuildCurrentChapterAsync();
+    void onLayoutChanged();
+    void invalidateAllPageCache();
+
 private:
     static constexpr int kMaxTocEntries = 1200;
     static constexpr int kTocEntriesPerPage = 13;
@@ -114,6 +119,7 @@ private:
     bool buildChapterPagesFrom(int index, uint32_t start, bool allowCache);
     bool renderCurrentReadingPage();
     bool renderChapterPreview(int index);
+    bool renderEndOfBookPage();
     bool continueReading();
     bool restartReading();
     uint32_t chapterContentStart(int index);
@@ -146,9 +152,16 @@ private:
     bool showingToc_ = true;
     bool showingBookmarks_ = false;
     bool showingReaderMenu_ = false;
+    bool showingEndOfBook_ = false;
     Bookmark bookmarks_[kMaxBookmarks];
     int bookmarkCount_ = 0;
     uint16_t bookmarkPage_ = 0;
+    // Async layout-rebuild tracking
+    TaskHandle_t layoutRebuildTask_ = nullptr;
+    int layoutRebuildChapter_ = -1;
+    int layoutRebuildTargetPage_ = 0;
+    uint32_t lastLayoutKey_ = 0;
+    void layoutRebuildTaskEntry();
 };
 
 extern ReaderBookService g_readerBook;

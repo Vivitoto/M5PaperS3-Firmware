@@ -39,10 +39,57 @@ String urlDecode(const String& s) {
     return out;
 }
 
+bool hasUnsafePathChars(const String& path) {
+    for (size_t i = 0; i < path.length(); ++i) {
+        if (static_cast<uint8_t>(path[i]) < 0x20 || path[i] == '\\') return true;
+    }
+    return false;
+}
+
+String normalizeUserPath(String path) {
+    if (path.isEmpty()) path = "/";
+    if (!path.startsWith("/")) path = "/" + path;
+    while (path.indexOf("//") >= 0) path.replace("//", "/");
+    int q = path.indexOf('?');
+    if (q >= 0) path = path.substring(0, q);
+    if (path.length() > 1 && path.endsWith("/")) path.remove(path.length() - 1);
+    return path;
+}
+
+bool isSdRootPath(const String& path) {
+    return normalizeUserPath(path) == "/";
+}
+
+String sdPathForUserPath(const String& userPath) {
+    // Web UI file management is SD-only; never expose SPIFFS/system partition.
+    return normalizeUserPath(userPath);
+}
+
 bool isSafePath(const String& path) {
     if (path.isEmpty()) return true;
+    if (hasUnsafePathChars(path)) return false;
     if (path.indexOf("..") >= 0) return false;
     return true;
+}
+
+bool queryParamValue(const char* uri, const char* key, String& out) {
+    // Do not match unrelated keys such as xpath when looking for path.
+    const char* q = strchr(uri, '?');
+    if (!q) return false;
+    String needle = String(key) + "=";
+    String query(q + 1);
+    int start = 0;
+    while (start <= static_cast<int>(query.length())) {
+        int amp = query.indexOf('&', start);
+        if (amp < 0) amp = query.length();
+        String part = query.substring(start, amp);
+        if (part.startsWith(needle)) {
+            out = urlDecode(part.substring(needle.length()));
+            return true;
+        }
+        start = amp + 1;
+    }
+    return false;
 }
 
 String formatFileSize(size_t bytes) {
@@ -89,28 +136,17 @@ String displayNameForEntry(const String& rawName, const String& dirPath) {
 // ── FS dispatch ─────────────────────────────────────────────────────────────
 
 FsId fsForPath(const String& userPath, String& outRealPath) {
-    if (userPath.startsWith("/spiffs")) {
-        outRealPath = userPath.substring(8);  // strip "/spiffs"
-        if (outRealPath.isEmpty()) outRealPath = "/";
-        return FsId::Spiffs;
-    }
-    outRealPath = userPath;
+    outRealPath = sdPathForUserPath(userPath);
     return FsId::Sd;
 }
 
 static File openFile(const String& path, FsId fs, const char* mode) {
-    if (fs == FsId::Spiffs) return SPIFFS.open(path.c_str(), mode);
+    (void)fs;
     return SD.open(path.c_str(), mode);
 }
 
 static bool dirExists(const String& path, FsId fs) {
-    if (fs == FsId::Spiffs) {
-        File f = SPIFFS.open(path.c_str(), "r");
-        if (!f) return false;
-        bool d = f.isDirectory();
-        f.close();
-        return d;
-    }
+    (void)fs;
     File f = SD.open(path.c_str());
     if (!f) return false;
     bool d = f.isDirectory();
@@ -119,12 +155,8 @@ static bool dirExists(const String& path, FsId fs) {
 }
 
 static bool renamePath(const String& fromUserPath, const String& toUserPath) {
-    String fromReal;
-    String toReal;
-    FsId fromFs = fsForPath(fromUserPath, fromReal);
-    FsId toFs = fsForPath(toUserPath, toReal);
-    if (fromFs != toFs) return false;
-    if (fromFs == FsId::Spiffs) return SPIFFS.rename(fromReal.c_str(), toReal.c_str());
+    String fromReal = sdPathForUserPath(fromUserPath);
+    String toReal = sdPathForUserPath(toUserPath);
     return SD.rename(fromReal.c_str(), toReal.c_str());
 }
 
@@ -149,7 +181,9 @@ String listFilesJson(const String& userPath) {
             json += ",\"size\":" + String(entry.size());
             json += ",\"modified\":" + String(static_cast<unsigned long>(entry.getLastWrite())) + "}";
         }
-        entry = root.openNextFile();
+        File next = root.openNextFile();
+        entry.close();
+        entry = next;
     }
     root.close();
     json += "]";
@@ -164,8 +198,8 @@ static bool mkDirRecursive(const String& path, FsId fs) {
         if (next < 0) next = path.length();
         String sub = path.substring(0, next);
         if (sub.length() > 1) {
-            if (fs == FsId::Spiffs) SPIFFS.mkdir(sub.c_str());
-            else SD.mkdir(sub.c_str());
+            (void)fs;
+            if (!dirExists(sub, FsId::Sd) && !SD.mkdir(sub.c_str())) return false;
         }
         pos = next + 1;
     }
@@ -173,18 +207,16 @@ static bool mkDirRecursive(const String& path, FsId fs) {
 }
 
 bool deleteFileOrDir(const String& userPath) {
-    String realPath;
-    FsId fs = fsForPath(userPath, realPath);
-    if (fs == FsId::Spiffs) {
-        return SPIFFS.remove(realPath.c_str()) || SPIFFS.rmdir(realPath.c_str());
-    }
+    String realPath = sdPathForUserPath(userPath);
     return SD.remove(realPath.c_str()) || SD.rmdir(realPath.c_str());
 }
 
 bool fileExists(const String& userPath) {
-    String realPath;
-    FsId fs = fsForPath(userPath, realPath);
-    return static_cast<bool>(openFile(realPath, fs, "r"));
+    String realPath = sdPathForUserPath(userPath);
+    File f = SD.open(realPath.c_str(), "r");
+    if (!f) return false;
+    f.close();
+    return true;
 }
 
 // ── HTTP response helpers ────────────────────────────────────────────────────
@@ -226,13 +258,8 @@ static String uriToUserPath(const char* uri) {
         // Browser JS encodes absolute destinations like /books/a.txt as
         // /api/files/%2Fbooks%2Fa.txt. Decode first, then normalize the leading
         // slash so SD paths do not become //books/a.txt.
-        tail = urlDecode(tail);
-        while (tail.startsWith("//")) tail.remove(0, 1);
-        if (!tail.startsWith("/")) tail = "/" + tail;
-        return tail;
+        return normalizeUserPath(urlDecode(tail));
     }
-    idx = u.indexOf("/spiffs");
-    if (idx >= 0) return urlDecode(u.substring(idx));
     return "/";
 }
 
@@ -249,6 +276,12 @@ static esp_err_t apiConfigGet(httpd_req_t* req) {
         "{"
         "\"fontSize\":%u,"
         "\"lineSpacing\":%u,"
+        "\"paragraphSpacing\":%u,"
+        "\"indentFirstLine\":%u,"
+        "\"marginLeft\":%u,"
+        "\"marginRight\":%u,"
+        "\"marginTop\":%u,"
+        "\"marginBottom\":%u,"
         "\"justify\":%s,"
         "\"refreshFrequency\":%u,"
         "\"wifiSsid\":\"%s\","
@@ -263,6 +296,12 @@ static esp_err_t apiConfigGet(httpd_req_t* req) {
         "}",
         c.fontSize,
         c.lineSpacing,
+        c.paragraphSpacing,
+        c.indentFirstLine,
+        c.marginLeft,
+        c.marginRight,
+        c.marginTop,
+        c.marginBottom,
         c.justify ? "true" : "false",
         static_cast<uint8_t>(c.refreshFrequency),
         jsonEscape(c.wifiSsid).c_str(),
@@ -308,6 +347,12 @@ static esp_err_t apiConfigPost(httpd_req_t* req) {
 
     if (obj.containsKey("fontSize"))        cfg.fontSize        = constrain(obj["fontSize"].as<uint8_t>(), 12, 48);
     if (obj.containsKey("lineSpacing"))     cfg.lineSpacing     = constrain(obj["lineSpacing"].as<uint8_t>(), 50, 200);
+    if (obj.containsKey("paragraphSpacing")) cfg.paragraphSpacing = constrain(obj["paragraphSpacing"].as<uint8_t>(), 0, 100);
+    if (obj.containsKey("indentFirstLine"))  cfg.indentFirstLine  = constrain(obj["indentFirstLine"].as<uint8_t>(), 0, 4);
+    if (obj.containsKey("marginLeft"))      cfg.marginLeft      = constrain(obj["marginLeft"].as<uint8_t>(), 0, 120);
+    if (obj.containsKey("marginRight"))     cfg.marginRight     = constrain(obj["marginRight"].as<uint8_t>(), 0, 120);
+    if (obj.containsKey("marginTop"))       cfg.marginTop       = constrain(obj["marginTop"].as<uint8_t>(), 0, 160);
+    if (obj.containsKey("marginBottom"))    cfg.marginBottom    = constrain(obj["marginBottom"].as<uint8_t>(), 0, 160);
     if (obj.containsKey("justify"))         cfg.justify         = obj["justify"].as<bool>();
     if (obj.containsKey("refreshFrequency")) cfg.refreshFrequency = static_cast<RefreshFrequency>(
         constrain(obj["refreshFrequency"].as<uint8_t>(), 0, 2));
@@ -361,17 +406,9 @@ static esp_err_t apiFileDownload(httpd_req_t* req) {
 }
 
 static esp_err_t apiFilesGet(httpd_req_t* req) {
-    // Extract ?path= from query string manually
-    const char* uri = req->uri;
     String userPath = "/";
-    const char* q = strchr(uri, '?');
-    if (q) {
-        String query(q + 1);
-        int eq = query.indexOf("path=");
-        if (eq >= 0) {
-            userPath = urlDecode(query.substring(eq + 5).c_str());
-        }
-    }
+    queryParamValue(req->uri, "path", userPath);
+    userPath = normalizeUserPath(userPath);
     if (!isSafePath(userPath)) return jsonErr(req, 403, "Invalid path");
 
     String json = listFilesJson(userPath);
@@ -381,11 +418,12 @@ static esp_err_t apiFilesGet(httpd_req_t* req) {
 // ── PUT /api/files/* — create / overwrite file ───────────────────────────────
 
 static esp_err_t apiFilePut(httpd_req_t* req) {
-    String userPath = uriToUserPath(req->uri);
+    String userPath = normalizeUserPath(uriToUserPath(req->uri));
     if (!isSafePath(userPath)) return jsonErr(req, 403, "Invalid path");
 
     String realPath;
     FsId fs = fsForPath(userPath, realPath);
+    if (realPath == "/" || realPath.endsWith("/")) return jsonErr(req, 400, "Invalid path");
 
     // Create parent directories if needed.
     int lastSlash = realPath.lastIndexOf('/');
@@ -409,6 +447,7 @@ static esp_err_t apiFilePut(httpd_req_t* req) {
         remaining -= n;
     }
     fh.close();
+    if (remaining > 0) return jsonErr(req, 400, "Incomplete upload");
     return jsonOk(req, "{\"ok\":true}", 12);
 }
 
@@ -422,7 +461,7 @@ static esp_err_t apiMkdir(httpd_req_t* req) {
     size_t received = 0;
     while (received < len) {
         int n = httpd_req_recv(req, body + received, len - received);
-        if (n <= 0) break;
+        if (n <= 0) return jsonErr(req, 400, "Incomplete read");
         received += n;
     }
     StaticJsonDocument<128> doc;
@@ -430,12 +469,13 @@ static esp_err_t apiMkdir(httpd_req_t* req) {
     if (err) return jsonErr(req, 400, "Invalid JSON");
     const char* path = doc["path"];
     if (!path) return jsonErr(req, 400, "Missing 'path'");
-    String userPath = urlDecode(path);
+    String userPath = normalizeUserPath(urlDecode(path));
     if (!isSafePath(userPath)) return jsonErr(req, 403, "Invalid path");
 
     String realPath;
     FsId fs = fsForPath(userPath, realPath);
     bool ok = mkDirRecursive(realPath, fs);
+    if (!ok) return jsonErr(req, 500, "Cannot create directory");
     char resp[64];
     snprintf(resp, sizeof(resp), "{\"created\":%s}", ok ? "true" : "false");
     return jsonOk(req, resp, strlen(resp));
@@ -451,7 +491,7 @@ static esp_err_t apiFileRename(httpd_req_t* req) {
     size_t received = 0;
     while (received < len) {
         int n = httpd_req_recv(req, body + received, len - received);
-        if (n <= 0) break;
+        if (n <= 0) return jsonErr(req, 400, "Incomplete read");
         received += n;
     }
     StaticJsonDocument<256> doc;
@@ -460,10 +500,10 @@ static esp_err_t apiFileRename(httpd_req_t* req) {
     const char* from = doc["from"];
     const char* to = doc["to"];
     if (!from || !to) return jsonErr(req, 400, "Missing path");
-    String fromPath = urlDecode(from);
-    String toPath = urlDecode(to);
+    String fromPath = normalizeUserPath(urlDecode(from));
+    String toPath = normalizeUserPath(urlDecode(to));
     if (!isSafePath(fromPath) || !isSafePath(toPath)) return jsonErr(req, 403, "Invalid path");
-    if (fromPath == "/" || fromPath == "/spiffs" || toPath == "/" || toPath == "/spiffs") {
+    if (isSdRootPath(fromPath) || isSdRootPath(toPath)) {
         return jsonErr(req, 400, "Invalid root path");
     }
 
@@ -480,9 +520,9 @@ static esp_err_t apiFileRename(httpd_req_t* req) {
 // ── DELETE /api/files/* ─────────────────────────────────────────────────────
 
 static esp_err_t apiFileDelete(httpd_req_t* req) {
-    String userPath = uriToUserPath(req->uri);
+    String userPath = normalizeUserPath(uriToUserPath(req->uri));
     if (!isSafePath(userPath)) return jsonErr(req, 403, "Invalid path");
-    if (userPath == "/" || userPath == "/spiffs") {
+    if (isSdRootPath(userPath)) {
         return jsonErr(req, 400, "Cannot delete root");
     }
 
@@ -513,8 +553,6 @@ static esp_err_t apiSystemInfo(httpd_req_t* req) {
     snprintf(buf, sizeof(buf),
         "{"
         "\"freeHeap\":%u,"
-        "\"spiffsTotal\":%zu,"
-        "\"spiffsUsed\":%zu,"
         "\"sdCardSize\":%llu,"
         "\"sdTotal\":%llu,"
         "\"sdUsed\":%llu,"
@@ -522,8 +560,6 @@ static esp_err_t apiSystemInfo(httpd_req_t* req) {
         "\"version\":\"%s\""
         "}",
         ESP.getFreeHeap(),
-        st.totalBytes,
-        st.usedBytes,
         static_cast<unsigned long long>(SD.cardSize()),
         static_cast<unsigned long long>(SD.totalBytes()),
         static_cast<unsigned long long>(SD.usedBytes()),
@@ -608,7 +644,6 @@ button.save:hover{background:#333}
     <div class="toolbar">
       <button onclick="chdir('/')">SD 根目录</button>
       <button onclick="ensureBooks()">书籍目录 /books</button>
-      <button onclick="chdir('/spiffs')">系统资源 /spiffs</button>
       <button onclick="loadFiles(currentPath)">刷新</button>
     </div>
     <div id="fileList" class="file-list"></div>
@@ -628,6 +663,12 @@ button.save:hover{background:#333}
     <h2>阅读排版</h2>
     <div class="row"><label>字体大小</label><input type="number" id="fontSize" min="12" max="48"> <span class="hint">12~48 px</span></div>
     <div class="row"><label>行间距</label><input type="number" id="lineSpacing" min="50" max="200"> <span class="hint">50~200 %</span></div>
+    <div class="row"><label>段间距</label><input type="number" id="paragraphSpacing" min="0" max="100"> <span class="hint">0~100 %</span></div>
+    <div class="row"><label>首行缩进</label><input type="number" id="indentFirstLine" min="0" max="4"> <span class="hint">0~4 字</span></div>
+    <div class="row"><label>左边距</label><input type="number" id="marginLeft" min="0" max="120"> <span class="hint">px</span></div>
+    <div class="row"><label>右边距</label><input type="number" id="marginRight" min="0" max="120"> <span class="hint">px</span></div>
+    <div class="row"><label>上边距</label><input type="number" id="marginTop" min="0" max="160"> <span class="hint">px</span></div>
+    <div class="row"><label>下边距</label><input type="number" id="marginBottom" min="0" max="160"> <span class="hint">px</span></div>
     <div class="row"><label>两端对齐</label><input type="checkbox" id="justify"></div>
   </div>
   <div class="card">
@@ -794,6 +835,12 @@ function loadConfig() {
   fetch(API+'/api/config').then(r=>r.json()).then(c=>{
     $('fontSize').value = c.fontSize;
     $('lineSpacing').value = c.lineSpacing;
+    $('paragraphSpacing').value = c.paragraphSpacing;
+    $('indentFirstLine').value = c.indentFirstLine;
+    $('marginLeft').value = c.marginLeft;
+    $('marginRight').value = c.marginRight;
+    $('marginTop').value = c.marginTop;
+    $('marginBottom').value = c.marginBottom;
     $('justify').checked = c.justify;
     $('refreshFrequency').value = c.refreshFrequency;
     $('wifiSsid').value = c.wifiSsid||'';
@@ -814,6 +861,12 @@ function saveConfig() {
   const payload = {
     fontSize: +$('fontSize').value,
     lineSpacing: +$('lineSpacing').value,
+    paragraphSpacing: +$('paragraphSpacing').value,
+    indentFirstLine: +$('indentFirstLine').value,
+    marginLeft: +$('marginLeft').value,
+    marginRight: +$('marginRight').value,
+    marginTop: +$('marginTop').value,
+    marginBottom: +$('marginBottom').value,
     justify: $('justify').checked,
     refreshFrequency: +$('refreshFrequency').value,
     wifiSsid: $('wifiSsid').value,
@@ -849,8 +902,6 @@ function loadInfo() {
     $('sysInfo').innerHTML =
       '<div>固件版本</div><div>'+i.version+'</div>'+
       '<div>可用内存</div><div>'+i.freeHeap+' B</div>'+
-      '<div>SPIFFS 总容量</div><div>'+fmtBytes(i.spiffsTotal)+'</div>'+
-      '<div>SPIFFS 已用</div><div>'+fmtBytes(i.spiffsUsed)+'</div>'+
       '<div>SD 卡容量</div><div>'+fmtBytes(i.sdCardSize||i.sdTotal)+'</div>'+
       '<div>SD 已用</div><div>'+fmtBytes(i.sdUsed)+'</div>'+
       '<div>运行时间</div><div>'+Math.floor(i.uptimeSeconds/60)+' 分钟</div>';

@@ -24,7 +24,7 @@ PROJECT = Path(__file__).resolve().parents[1]
 REPO = PROJECT.parent
 WORKSPACE = Path("/home/vito/.openclaw/workspace")
 ARTIFACTS = WORKSPACE / "artifacts" / "Vink-PaperS3"
-DEFAULT_SLUG = "ui-restore"
+DEFAULT_SLUG = "async-rebuild"
 APP_SLOT_SIZE = 0xC00000  # v0.3 single-app layout for full ReadPaper PROGMEM font
 SPIFFS_SIZE = 0x3F0000
 FULL_FLASH_SIZE = 0x1000000
@@ -121,7 +121,7 @@ def vink3_source_invariants(main_cpp: str) -> None:
     platformio = read("platformio.ini")
 
     assert_contains(main_cpp, "xTaskCreatePinnedToCore", "v0.3 main starts a ReadPaper-style pinned MainTask")
-    assert_contains(upstream, "kVinkPaperS3FirmwareVersion = \"v0.3.9-rc-ui", "single firmware version constant matches the manifest top version")
+    assert_contains(upstream, "kVinkPaperS3FirmwareVersion = \"v0.3.10-rc-async-rebuild\"", "single firmware version constant matches the manifest top version")
     assert_contains(main_cpp, "kVinkPaperS3FirmwareVersion", "main task init log uses the shared firmware version")
     assert_contains(runtime_cpp, "kVinkPaperS3FirmwareVersion", "runtime boot logs use the shared firmware version")
     assert_not_contains(main_cpp, "v0.3.2-rc", "main task must not show stale firmware version")
@@ -221,6 +221,8 @@ def vink3_source_invariants(main_cpp: str) -> None:
     assert_contains(reader_cpp, "ReaderTextRenderer", "v0.3 has a separate reader body renderer")
     assert_contains(reader_cpp, "beginReadPaperFullFont", "reader body renderer uses full ReadPaper PROGMEM font")
     assert_contains(reader_cpp, "· %u%%", "reader footer shows chapter page progress percentage")
+    assert_contains(reader_cpp, "Thin visual progress rail", "reader footer adds a visual progress rail")
+    assert_contains(reader_cpp, "fillW", "reader progress rail fills according to percentage")
     assert_contains(reader_cpp, "indentFirstLine", "reader body renderer applies first-line paragraph indentation")
     assert_contains(reader_cpp, "paragraphExtra", "reader body renderer applies paragraph spacing consistently with pagination")
     assert_contains(reader_book_cpp, "ReaderBookService", "v0.3 has reader book service for opening TXT books")
@@ -237,6 +239,9 @@ def vink3_source_invariants(main_cpp: str) -> None:
     assert_contains(reader_book_cpp, "读/目/页", "library explains progress/TOC/page-cache status markers")
     assert_contains(reader_book_cpp, "handleLibraryTap", "reader book service opens selected library entries")
     assert_contains(reader_book_cpp, "left third = previous page", "reader page uses large official-friendly 3-zone tap navigation")
+    assert_contains(reader_book_cpp, "renderEndOfBookPage", "reader shows an explicit end-of-book page instead of a dead next-page tap")
+    assert_contains(reader_book_cpp, "本书已读完", "reader end-of-book page uses clear Chinese completion wording")
+    assert_contains(reader_book_cpp, "ro.dark       = cfg.darkModeDefault", "reader body honors dark-mode config while rendering pages")
     assert_contains(reader_cpp, "renderListPage", "reader text renderer can draw list rows aligned with tap zones")
     assert_contains(reader_cpp, "drawShellTabs", "reader management pages show the same four-tab shell")
     assert_contains(reader_cpp, "outline + underline", "reader tabs use the same no-black-fill selected style as shell tabs")
@@ -278,6 +283,7 @@ def vink3_source_invariants(main_cpp: str) -> None:
     assert_contains(reader_book_cpp, "openTocEntry", "reader book service can open a TOC entry preview")
     assert_contains(reader_book_cpp, "章节打开失败", "reader chapter jump has a visible failure fallback instead of silent no-op")
     assert_contains(state_cpp, "SystemState::ReaderMenu", "state machine routes reader menu interactions")
+    assert_contains(state_cpp, "state_ == SystemState::ReaderMenu) {\n                if (g_readerBook.handleLongPress", "state machine routes reading long-press gestures to bookmark handling")
     assert_contains(state_cpp, "renderLibraryPage", "state machine routes Library tab through reader book list")
     assert_contains(state_cpp, "fromLibrary", "state machine preserves library tap selection before opening reader")
     assert_contains(state_cpp, "if (!g_readerBook.handleLibraryTap", "state machine only enters reader menu after a valid library row tap")

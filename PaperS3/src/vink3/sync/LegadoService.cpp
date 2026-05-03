@@ -113,36 +113,57 @@ bool LegadoService::httpPost(const String& url, const String& body, String& outB
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-JsonArray LegadoService::getBookshelf() {
+bool LegadoService::getBookshelfCount(int& outCount) {
+    outCount = 0;
     String body;
     if (!httpGet(buildUrl("getBookshelf"), body)) {
         lastError_ = body.isEmpty() ? lastError_ : body;
-        return JsonArray();
+        return false;
     }
     StaticJsonDocument<4096> doc;
     auto err = deserializeJson(doc, body);
     if (err) {
         lastError_ = "JSON parse error";
-        return JsonArray();
+        return false;
     }
     JsonVariant data = doc["data"];
     if (data.is<JsonArray>()) {
+        outCount = data.as<JsonArray>().size();
         httpConnected_ = true;
-        return data.as<JsonArray>();
+        return true;
+    }
+    if (doc.is<JsonArray>()) {
+        outCount = doc.as<JsonArray>().size();
+        httpConnected_ = true;
+        return true;
     }
     lastError_ = "Invalid response format";
-    return JsonArray();
+    return false;
 }
 
-JsonArray LegadoService::getChapterList(const String& bookUrl) {
+bool LegadoService::getChapterCount(const String& bookUrl, int& outCount) {
+    outCount = 0;
     char buf[512];
     snprintf(buf, sizeof(buf), "getChapterList?url=%s", s_urlEncode(bookUrl).c_str());
     String body;
-    if (!httpGet(buildUrl(buf), body)) return JsonArray();
+    if (!httpGet(buildUrl(buf), body)) return false;
     StaticJsonDocument<2048> doc;
     auto err = deserializeJson(doc, body);
-    if (err) return JsonArray();
-    return doc["data"].as<JsonArray>();
+    if (err) {
+        lastError_ = "JSON parse error";
+        return false;
+    }
+    JsonVariant data = doc["data"];
+    if (data.is<JsonArray>()) {
+        outCount = data.as<JsonArray>().size();
+        return true;
+    }
+    if (doc.is<JsonArray>()) {
+        outCount = doc.as<JsonArray>().size();
+        return true;
+    }
+    lastError_ = "Invalid response format";
+    return false;
 }
 
 String LegadoService::getBookContent(const String& bookUrl, int chapterIndex) {

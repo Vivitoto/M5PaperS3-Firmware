@@ -64,16 +64,24 @@ bool WifiService::startAp(const String& ssid, const String& password, bool withW
     apSsid_ = ssid.isEmpty() ? "Vink-PaperS3" : ssid;
     apPassword_ = password;
 
-    WiFi.softAP(apSsid_.c_str(),
-                apPassword_.isEmpty() ? nullptr : apPassword_.c_str(),
-                6,
-                0,
-                4);
+    bool apStarted = WiFi.softAP(apSsid_.c_str(),
+                                 apPassword_.isEmpty() ? nullptr : apPassword_.c_str(),
+                                 6,
+                                 0,
+                                 4);
+    if (!apStarted) {
+        Serial.println("[vink3][wifi] softAP start failed");
+        mode_ = WifiOpMode::Off;
+        return false;
+    }
 
     mode_ = withWebUi ? WifiOpMode::ApWebUi : WifiOpMode::Ap;
 
-    if (withWebUi) {
-        startHttpServer();
+    if (withWebUi && !startHttpServer()) {
+        Serial.println("[vink3][wifi] WebUI server start failed");
+        WiFi.softAPdisconnect(true);
+        mode_ = WifiOpMode::Off;
+        return false;
     }
 
     Serial.printf("[vink3][wifi] AP started: SSID=%s IP=%s\n",
@@ -133,6 +141,7 @@ esp_err_t infoHandler(httpd_req_t* req) {
 }
 
 esp_err_t booksHandler(httpd_req_t* req) {
+    // deprecated: legacy placeholder, use /api/files or reader library APIs.
     httpd_resp_set_hdr(req, "Content-Type", "application/json");
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
     return httpd_resp_send(req, "{\"books\":[]}", 14);

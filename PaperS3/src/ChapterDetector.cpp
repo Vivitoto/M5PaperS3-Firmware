@@ -48,12 +48,12 @@ int ChapterDetector::detect(File& file, ChapterDetectResult* results, int maxRes
     int count = 0;
     int lastChapterOffset = 0;
     int lastChapterNumber = 0;
-    uint32_t charOffset = 0;
     int consecutiveEmptyLines = 0;
 
     file.seek(0);
 
     while (file.available() && count < maxResults) {
+        uint32_t lineStartOffset = file.position();
         int lineLen = readLine(file, _lineBuffer, LINE_BUF_SIZE);
         if (lineLen <= 0) break;
 
@@ -68,7 +68,6 @@ int ChapterDetector::detect(File& file, ChapterDetectResult* results, int maxRes
 
         if (isEmpty) {
             consecutiveEmptyLines++;
-            charOffset += lineLen;  // 包含换行符
             continue;
         }
 
@@ -77,7 +76,7 @@ int ChapterDetector::detect(File& file, ChapterDetectResult* results, int maxRes
         if (matchLine(_lineBuffer, lineLen, result)) {
             // 启发式打分
             result.score = scoreLine(_lineBuffer, lineLen, result.score,
-                                     result.chapterNumber, charOffset, fileSize,
+                                     result.chapterNumber, lineStartOffset, fileSize,
                                      lastChapterOffset);
 
             if (result.score >= 50) {  // 只保留高置信度结果
@@ -96,9 +95,9 @@ int ChapterDetector::detect(File& file, ChapterDetectResult* results, int maxRes
                     }
                 }
                 if (accept) {
-                    result.charOffset = charOffset;
+                    result.charOffset = lineStartOffset;
                     results[count] = result;
-                    lastChapterOffset = charOffset;
+                    lastChapterOffset = static_cast<int>(lineStartOffset);
                     lastChapterNumber = result.chapterNumber;
                     count++;
 
@@ -113,7 +112,6 @@ int ChapterDetector::detect(File& file, ChapterDetectResult* results, int maxRes
             }
         }
 
-        charOffset += lineLen;
         consecutiveEmptyLines = 0;
     }
 

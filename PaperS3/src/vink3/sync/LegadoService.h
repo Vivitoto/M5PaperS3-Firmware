@@ -41,12 +41,13 @@ public:
 
     // ── HTTP operations (blocking — call from a task) ─────────────────────
 
-    // GET /getBookshelf → JsonArray of book objects.
-    // Returns an empty array on failure.
-    JsonArray getBookshelf();
+    // GET /getBookshelf → count book objects without returning JsonArray views
+    // backed by temporary JSON documents.
+    bool getBookshelfCount(int& outCount);
 
-    // GET /getChapterList?url=<bookUrl> → JsonArray of chapters.
-    JsonArray getChapterList(const String& bookUrl);
+    // GET /getChapterList?url=<bookUrl> → count chapters without exposing
+    // ArduinoJson views beyond the local document lifetime.
+    bool getChapterCount(const String& bookUrl, int& outCount);
 
     // GET /getBookContent?url=<bookUrl>&index=<chapterIdx> → String (raw text).
     String getBookContent(const String& bookUrl, int chapterIndex);

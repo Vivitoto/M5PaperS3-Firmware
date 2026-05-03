@@ -418,6 +418,15 @@ void ReaderTextRenderer::renderTextPage(const char* title, const char* body, uin
     const uint16_t percent = min<uint16_t>(100, (static_cast<uint32_t>(safePage) * 100U) / safeTotal);
     snprintf(footer, sizeof(footer), "%u / %u · %u%%", static_cast<unsigned>(safePage), static_cast<unsigned>(safeTotal), static_cast<unsigned>(percent));
     drawText(kPaperS3Width - options.marginRight - textWidth(footer), kPaperS3Height - 34, footer, mid);
+
+    // Thin visual progress rail: easier to read at a glance on e-paper than
+    // footer numbers alone, and it costs only a few static draw operations.
+    const int16_t railX = options.marginLeft;
+    const int16_t railY = kPaperS3Height - 12;
+    const int16_t railW = max<int16_t>(24, kPaperS3Width - options.marginLeft - options.marginRight);
+    canvas_->drawFastHLine(railX, railY, railW, mid);
+    const int16_t fillW = static_cast<int16_t>((static_cast<uint32_t>(railW) * percent) / 100U);
+    if (fillW > 0) canvas_->fillRect(railX, railY - 1, fillW, 3, fg);
 }
 
 void ReaderTextRenderer::renderListPage(const char* title, const char* summary, const char* const* rows, int rowCount, int16_t rowY, int16_t rowH, uint16_t page, uint16_t totalPages, int activeTab, const ReaderRenderOptions& options) {

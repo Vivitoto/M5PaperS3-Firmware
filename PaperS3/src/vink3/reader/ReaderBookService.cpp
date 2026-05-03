@@ -168,6 +168,9 @@ void ReaderBookService::closeCurrent() {
     hasProgress_ = false;
     showingBookEntry_ = false;
     showingToc_ = true;
+    showingEndOfBook_ = false;
+    showingBookmarks_ = false;
+    showingReaderMenu_ = false;
     bookPath_[0] = '\0';
     activeTextPath_[0] = '\0';
     title_[0] = '\0';
@@ -877,6 +880,10 @@ void ReaderBookService::renderCurrent() {
         renderTocPage(tocPage_);
         return;
     }
+    if (showingEndOfBook_) {
+        renderEndOfBookPage();
+        return;
+    }
     if (pageCount_ > 0) {
         if (!renderCurrentReadingPage()) renderTocPage(tocPage_);
         return;
@@ -952,6 +959,7 @@ void ReaderBookService::renderBookEntryPage() {
 bool ReaderBookService::continueReading() {
     showingBookEntry_ = false;
     showingToc_ = false;
+    showingEndOfBook_ = false;
     if (hasProgress_ && currentTocIndex_ >= 0 && pageCount_ > 0) {
         return renderCurrentReadingPage();
     }
@@ -964,6 +972,7 @@ bool ReaderBookService::continueReading() {
 bool ReaderBookService::restartReading() {
     showingBookEntry_ = false;
     showingToc_ = false;
+    showingEndOfBook_ = false;
     hasProgress_ = false;
     currentPage_ = 0;
     currentTocIndex_ = -1;
@@ -976,6 +985,7 @@ bool ReaderBookService::restartReading() {
 bool ReaderBookService::nextPage() {
     if (showingBookEntry_) return continueReading();
     if (showingToc_) return nextTocPage();
+    if (showingEndOfBook_) return renderEndOfBookPage();
     if (!open_ || pageCount_ <= 0) return false;
     if (currentPage_ + 1 < pageCount_) {
         currentPage_++;
@@ -987,12 +997,17 @@ bool ReaderBookService::nextPage() {
     if (currentTocIndex_ + 1 < tocCount_) {
         return openTocEntry(currentTocIndex_ + 1);
     }
-    return false;
+    showingEndOfBook_ = true;
+    return renderEndOfBookPage();
 }
 
 bool ReaderBookService::prevPage() {
     if (showingBookEntry_) return false;
     if (showingToc_) return prevTocPage();
+    if (showingEndOfBook_) {
+        showingEndOfBook_ = false;
+        return renderCurrentReadingPage();
+    }
     if (!open_ || pageCount_ <= 0) return false;
     if (currentPage_ > 0) {
         currentPage_--;
@@ -1027,6 +1042,13 @@ bool ReaderBookService::handleTap(int16_t x, int16_t y) {
     if (!open_) return false;
     if (showingBookmarks_) return handleBookmarkTap(x, y);
     if (showingReaderMenu_) return handleReaderMenuTap(x, y);
+    if (showingEndOfBook_) {
+        if (x < kPaperS3Width / 3) return prevPage();
+        showingEndOfBook_ = false;
+        showingBookEntry_ = true;
+        renderBookEntryPage();
+        return true;
+    }
     if (showingBookEntry_) {
         if (x >= kEntryButtonX && x < kEntryButtonX + kEntryButtonW && y >= kEntryContinueY && y < kEntryContinueY + kEntryButtonH) return continueReading();
         if (x >= kEntryButtonX && x < kEntryButtonX + kEntryButtonW && y >= kEntryTocY && y < kEntryTocY + kEntryButtonH) {
@@ -1204,6 +1226,7 @@ bool ReaderBookService::openTocEntry(int index) {
     currentTocIndex_ = index;
     currentPage_ = 0;
     showingToc_ = false;
+    showingEndOfBook_ = false;
     if (!buildChapterPages(index)) {
         if (renderChapterPreview(index)) {
             saveProgress();
@@ -1418,9 +1441,33 @@ bool ReaderBookService::renderCurrentReadingPage() {
     ro.indentFirstLine = lc.indentFirstLine;
     ro.paragraphSpacing = lc.paragraphSpacing;
     ro.justify    = cfg.justify;
-
+    ro.dark       = cfg.darkModeDefault;
 
     g_readerText.renderTextPage(header, body, currentPage_ + 1, pageCount_, ro);
+    saveProgress();
+    return true;
+}
+
+bool ReaderBookService::renderEndOfBookPage() {
+    if (!open_) return false;
+    showingEndOfBook_ = true;
+    const char* chapterTitle = (currentTocIndex_ >= 0 && currentTocIndex_ < tocCount_) ? toc_[currentTocIndex_].title.c_str() : "最后一章";
+    char body[700];
+    snprintf(body, sizeof(body),
+             "《%s》已读完。\n\n"
+             "最后位置：%s · 第 %d 页\n\n"
+             "左侧点击/右滑：回到最后一页\n"
+             "中间或右侧点击：打开书籍入口\n"
+             "也可以从书籍入口回目录或从头开始。",
+             title_[0] ? title_ : "当前书籍",
+             chapterTitle,
+             currentPage_ + 1);
+
+    const auto& cfg = g_configService.get();
+    ReaderRenderOptions ro;
+    ro.fontSize = cfg.fontSize;
+    ro.dark = cfg.darkModeDefault;
+    g_readerText.renderTextPage("本书已读完", body, 1, 1, ro);
     saveProgress();
     return true;
 }
@@ -1459,6 +1506,72 @@ bool ReaderBookService::renderChapterPreview(int index) {
     snprintf(header, sizeof(header), "%03d %s", index + 1, titleBuf);
     g_readerText.renderTextPage(header, content, 1, 1);
     return true;
+}
+
+bool ReaderBookService::rebuildCurrentChapter() {
+    if (currentTocIndex_ < 0 || currentTocIndex_ >= tocCount_) return false;
+    const uint32_t start = chapterContentStart(currentTocIndex_);
+    return buildChapterPagesFrom(currentTocIndex_, start, false) && renderCurrentReadingPage();
+}
+
+void ReaderBookService::rebuildCurrentChapterAsync() {
+    if (layoutRebuildTask_) {
+        vTaskDelete(layoutRebuildTask_);
+        layoutRebuildTask_ = nullptr;
+    }
+    layoutRebuildChapter_ = currentTocIndex_;
+    layoutRebuildTargetPage_ = currentPage_;
+    lastLayoutKey_ = pageLayoutKey();
+    xTaskCreatePinnedToCore(
+        [](void* arg) {
+            static_cast<ReaderBookService*>(arg)->layoutRebuildTaskEntry();
+        },
+        "vink3-layout-rebuild",
+        8192,
+        this,
+        2,
+        &layoutRebuildTask_,
+        1);
+}
+
+void ReaderBookService::layoutRebuildTaskEntry() {
+    if (layoutRebuildChapter_ < 0 || layoutRebuildChapter_ >= tocCount_) {
+        layoutRebuildTask_ = nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+    renderChapterLoadingPage(layoutRebuildChapter_);
+    g_displayService.enqueueFull(true, 100);
+    {
+        const uint32_t start = chapterContentStart(layoutRebuildChapter_);
+        if (!buildChapterPagesFrom(layoutRebuildChapter_, start, false)) {
+            layoutRebuildTask_ = nullptr;
+            vTaskDelete(nullptr);
+            return;
+        }
+    }
+    if (layoutRebuildTargetPage_ >= pageCount_) {
+        layoutRebuildTargetPage_ = max(0, pageCount_ - 1);
+    }
+    currentPage_ = layoutRebuildTargetPage_;
+    layoutRebuildTask_ = nullptr;
+    renderCurrentReadingPage();
+    g_displayService.enqueueFull(true, 100);
+    vTaskDelete(nullptr);
+}
+
+void ReaderBookService::onLayoutChanged() {
+    if (!open_ || !bookPath_[0]) return;
+    char path[192];
+    getPageCachePath(path, sizeof(path));
+    if (SD.exists(path)) SD.remove(path);
+}
+
+void ReaderBookService::invalidateAllPageCache() {
+    if (!open_ || !bookPath_[0]) return;
+    char path[192];
+    getPageCachePath(path, sizeof(path));
+    if (SD.exists(path)) SD.remove(path);
 }
 
 } // namespace vink3
