@@ -53,7 +53,6 @@ bool ReaderTextRenderer::ready() const {
 }
 
 uint16_t ReaderTextRenderer::fontSize() const {
-    if (optionsFontSize_ > 0) return optionsFontSize_;
     if (readPaperFullReady_) return readPaperFontHeight_;
     return font_.isLoaded() ? font_.getFontSize() : 24;
 }
@@ -292,36 +291,25 @@ size_t ReaderTextRenderer::measurePageBytes(const char* text, size_t len, const 
     int16_t y = options.marginTop;
     const int16_t maxWidth = kPaperS3Width - options.marginLeft - options.marginRight;
     const int16_t lineHeight = fontSize() + options.lineGap;
-    const int16_t paragraphExtra = (lineHeight * options.paragraphSpacing) / 100;
-    const int16_t indentPx = static_cast<int16_t>(fontSize()) * options.indentFirstLine;
     const int16_t bottom = kPaperS3Height - options.marginBottom;
     const uint8_t* bytes = reinterpret_cast<const uint8_t*>(text);
-    bool paragraphStart = true;
 
     while (pos < len && y + lineHeight < bottom) {
-        int newlineCount = 0;
-        while (pos < len && (text[pos] == '\n' || text[pos] == '\r')) { pos++; newlineCount++; }
-        if (newlineCount > 0) {
-            if (!paragraphStart) y += paragraphExtra;
-            paragraphStart = true;
-        }
-        if (pos >= len || y + lineHeight >= bottom) break;
+        while (pos < len && (text[pos] == '\n' || text[pos] == '\r')) pos++;
+        if (pos >= len) break;
 
         const size_t lineStart = pos;
         size_t lastGood = pos;
         int16_t width = 0;
-        const int16_t lineMaxWidth = max<int16_t>(fontSize(), maxWidth - (paragraphStart ? indentPx : 0));
-        bool endedByNewline = false;
         while (pos < len) {
             const size_t before = pos;
             uint32_t ch = decodeUtf8(bytes, pos, len);
             if (ch == '\n' || ch == '\r') {
                 pos = before;
-                endedByNewline = true;
                 break;
             }
             const uint8_t adv = charAdvance(ch);
-            if (width + adv > lineMaxWidth) {
+            if (width + adv > maxWidth) {
                 pos = lastGood > lineStart ? lastGood : pos;
                 break;
             }
@@ -334,8 +322,6 @@ size_t ReaderTextRenderer::measurePageBytes(const char* text, size_t len, const 
             pos = force > lineStart ? force : lineStart + 1;
         }
         y += lineHeight;
-        if (endedByNewline) y += paragraphExtra;
-        paragraphStart = endedByNewline;
     }
     return pos;
 }
@@ -370,7 +356,6 @@ void ReaderTextRenderer::drawShellTabs(int activeTab, const ReaderRenderOptions&
 void ReaderTextRenderer::renderTextPage(const char* title, const char* body, uint16_t page, uint16_t totalPages, const ReaderRenderOptions& options) {
     if (!canvas_) return;
     if (!ready()) loadDefaultFont();
-    setOptionsFontSize(options.fontSize);
     canvas_->fillSprite(options.dark ? TFT_BLACK : TFT_WHITE);
     const uint16_t fg = options.dark ? TFT_WHITE : TFT_BLACK;
     const uint16_t mid = options.dark ? 0xC618 : 0x8410;
@@ -384,55 +369,29 @@ void ReaderTextRenderer::renderTextPage(const char* title, const char* body, uin
     int16_t y = options.marginTop;
     const int16_t maxWidth = kPaperS3Width - options.marginLeft - options.marginRight;
     const int16_t lineHeight = fontSize() + options.lineGap;
-    const int16_t paragraphExtra = (lineHeight * options.paragraphSpacing) / 100;
-    const int16_t indentPx = static_cast<int16_t>(fontSize()) * options.indentFirstLine;
     const int16_t bottom = kPaperS3Height - options.marginBottom;
-    bool paragraphStart = true;
     while (pos < len && y + lineHeight < bottom) {
-        int newlineCount = 0;
-        while (pos < len && (text[pos] == '\n' || text[pos] == '\r')) { pos++; newlineCount++; }
-        if (newlineCount > 0) {
-            if (!paragraphStart) y += paragraphExtra;
-            paragraphStart = true;
-        }
-        if (pos >= len || y + lineHeight >= bottom) break;
-        const int16_t lineIndent = paragraphStart ? indentPx : 0;
-        size_t end = findWrapBreak(text, pos, max<int16_t>(fontSize(), maxWidth - lineIndent));
+        while (pos < len && (text[pos] == '\n' || text[pos] == '\r')) pos++;
+        size_t end = findWrapBreak(text, pos, maxWidth);
         if (end <= pos) break;
         char line[256];
         size_t n = end - pos;
         if (n >= sizeof(line)) n = sizeof(line) - 1;
         memcpy(line, text + pos, n);
         line[n] = '\0';
-        drawText(options.marginLeft + lineIndent, y, line, fg);
-        const bool endedByNewline = (end < len && (text[end] == '\n' || text[end] == '\r'));
+        drawText(options.marginLeft, y, line, fg);
         pos = end;
         y += lineHeight;
-        if (endedByNewline) y += paragraphExtra;
-        paragraphStart = endedByNewline;
     }
 
-    char footer[64];
-    const uint16_t safeTotal = totalPages > 0 ? totalPages : 1;
-    const uint16_t safePage = page > 0 ? page : 1;
-    const uint16_t percent = min<uint16_t>(100, (static_cast<uint32_t>(safePage) * 100U) / safeTotal);
-    snprintf(footer, sizeof(footer), "%u / %u · %u%%", static_cast<unsigned>(safePage), static_cast<unsigned>(safeTotal), static_cast<unsigned>(percent));
+    char footer[48];
+    snprintf(footer, sizeof(footer), "%u / %u", static_cast<unsigned>(page), static_cast<unsigned>(totalPages));
     drawText(kPaperS3Width - options.marginRight - textWidth(footer), kPaperS3Height - 34, footer, mid);
-
-    // Thin visual progress rail: easier to read at a glance on e-paper than
-    // footer numbers alone, and it costs only a few static draw operations.
-    const int16_t railX = options.marginLeft;
-    const int16_t railY = kPaperS3Height - 12;
-    const int16_t railW = max<int16_t>(24, kPaperS3Width - options.marginLeft - options.marginRight);
-    canvas_->drawFastHLine(railX, railY, railW, mid);
-    const int16_t fillW = static_cast<int16_t>((static_cast<uint32_t>(railW) * percent) / 100U);
-    if (fillW > 0) canvas_->fillRect(railX, railY - 1, fillW, 3, fg);
 }
 
 void ReaderTextRenderer::renderListPage(const char* title, const char* summary, const char* const* rows, int rowCount, int16_t rowY, int16_t rowH, uint16_t page, uint16_t totalPages, int activeTab, const ReaderRenderOptions& options) {
     if (!canvas_) return;
     if (!ready()) loadDefaultFont();
-    setOptionsFontSize(options.fontSize);
     canvas_->fillSprite(options.dark ? TFT_BLACK : TFT_WHITE);
     const uint16_t fg = options.dark ? TFT_WHITE : TFT_BLACK;
     const uint16_t mid = options.dark ? 0xC618 : 0x8410;

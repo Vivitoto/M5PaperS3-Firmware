@@ -12,9 +12,6 @@ struct ReaderRenderOptions {
     int16_t marginRight = 30;
     int16_t marginBottom = 46;
     int16_t lineGap = 12;
-    uint8_t indentFirstLine = 2;
-    uint8_t paragraphSpacing = 50;
-    bool justify = false;
     bool vertical = false;
     bool dark = false;
 };
@@ -26,8 +23,6 @@ public:
     bool loadFont(const char* path);
     bool ready() const;
     uint16_t fontSize() const;
-    M5Canvas* canvas() const { return canvas_; }
-    void setOptionsFontSize(uint8_t s) { optionsFontSize_ = s; }
 
     void renderPlaceholderPage();
     void renderTextPage(const char* title, const char* body, uint16_t page, uint16_t totalPages, const ReaderRenderOptions& options = ReaderRenderOptions{});
@@ -63,7 +58,6 @@ private:
     bool readPaperFullReady_ = false;
     uint32_t readPaperCharCount_ = 0;
     uint8_t readPaperFontHeight_ = 0;
-    uint8_t optionsFontSize_ = 0;
     FontManager font_;
 };
 

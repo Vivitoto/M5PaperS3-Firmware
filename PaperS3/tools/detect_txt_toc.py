@@ -12,14 +12,9 @@ import re
 from pathlib import Path
 
 CHAPTER_RE = re.compile(
-    r"^\s*(?:正文\s*[:：\-]?\s*)?[【\[\(（]?"
-    r"(第(?P<num>[一二三四五六七八九十百千万零〇两0-9０-９]+)(?P<kind>[章节卷部集回篇])(?P<title>[^\n\r】\]\)）]{0,80}))"
-    r"[】\]\)）]?\s*$"
+    r"^\s*(第(?P<num>[一二三四五六七八九十百千万零〇两0-9０-９]+)(?P<kind>[章节卷部集回篇])(?P<title>[^\n\r]{0,80}))\s*$"
 )
-VOLUME_PREFIX_RE = re.compile(
-    r"^\s*(?P<kind>[卷部篇册])(?P<num>[一二三四五六七八九十百千万零〇两0-9０-９]+)(?P<title>[^\n\r]{0,80})\s*$"
-)
-ALT_RE = re.compile(r"^\s*(?:正文\s*[:：\-]?\s*)?[【\[\(（]?((?:Chapter|CHAPTER|Ch\.?|CH\.?)[\s.]+(?P<num>[0-9]+)(?P<title>[^\n\r】\]\)）]{0,80}))[】\]\)）]?\s*$")
+ALT_RE = re.compile(r"^\s*((?:Chapter|CHAPTER|Ch\.?|CH\.?)[\s.]+(?P<num>[0-9]+)(?P<title>[^\n\r]{0,80}))\s*$")
 
 CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 CN_UNITS = {"十": 10, "百": 100, "千": 1000}
@@ -63,7 +58,7 @@ def iter_lines_with_offsets(text: str):
     for line in text.splitlines(keepends=True):
         bare = line.rstrip("\r\n")
         yield offset, bare
-        offset += len(line.encode("utf-8"))
+        offset += len(line)
 
 
 def detect_toc(text: str, max_entries: int = 2000) -> list[dict]:
@@ -83,13 +78,6 @@ def detect_toc(text: str, max_entries: int = 2000) -> list[dict]:
             number = cn_to_int(m.group("num"))
             title = m.group(1).strip()
         else:
-            m = VOLUME_PREFIX_RE.match(stripped)
-            if m:
-                kind = m.group("kind")
-                number = cn_to_int(m.group("num"))
-                suffix = m.group('title').strip()
-                title = f"第{number}{kind}" + (f" {suffix}" if suffix else "")
-        if not m:
             m = ALT_RE.match(stripped)
             if m:
                 kind = "章"
